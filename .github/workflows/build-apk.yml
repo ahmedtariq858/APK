@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -34,3 +36,15 @@ jobs:
             app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # Manual runs ("Run workflow") also commit the release APK into the repo under apk/.
+      - name: Commit APK to repository
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          mkdir -p apk
+          cp app/build/outputs/apk/release/app-release.apk apk/IR-Universal-Remote.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apk/IR-Universal-Remote.apk
+          git commit -m "Add built APK [skip ci]" || echo "No changes"
+          git push
