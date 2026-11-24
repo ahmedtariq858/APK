@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#120c06">
+<title>Lost Relic: The Infinite Chase</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="game"></div>
+<div id="flash"></div>
+
+<!-- ================= HUD ================= -->
+<div id="hud" class="hidden">
+  <div class="hud-top">
+    <div class="hud-score">
+      <div class="score" id="hScore">0</div>
+      <div class="dist" id="hDist">0 m</div>
+    </div>
+    <div class="hud-right">
+      <div class="pill"><i class="coin-ico"></i><span id="hCoins">0</span></div>
+      <button class="icon-btn" id="btnPause" aria-label="Pause"><span class="pause-ico"></span></button>
+    </div>
+  </div>
+  <div id="powerups"></div>
+  <div id="danger"></div>
+</div>
+<div id="banner" class="banner"><small id="bannerSub"></small><span id="bannerTxt"></span></div>
+<div id="hint" class="hint"></div>
+<div id="toast" class="toast"></div>
+
+<!-- ================= MENU ================= -->
+<div id="menu" class="screen show">
+  <div class="cover" style="background-image:url(cover.jpg)"></div>
+  <div class="cover-shade"></div>
+  <div class="menu-top">
+    <div class="pill"><i class="coin-ico"></i><span id="mCoins">0</span></div>
+    <button class="icon-btn" id="btnSound" aria-label="Sound"><span id="soundIco">♪</span></button>
+  </div>
+  <div class="logo">
+    <div class="logo1">LOST RELIC</div>
+    <div class="logo2">THE INFINITE CHASE</div>
+  </div>
+  <div class="menu-bottom">
+    <div class="best">BEST SCORE <b id="mBest">0</b></div>
+    <button class="btn btn-gold big" id="btnPlay">RUN!</button>
+    <div class="row">
+      <button class="btn" id="btnShop">SHOP</button>
+      <button class="btn" id="btnStory">STORY</button>
+      <button class="btn" id="btnHelp">HOW TO</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= STORY ================= -->
+<div id="story" class="screen modal">
+  <div class="cover" style="background-image:url(cover2.jpg)"></div>
+  <div class="cover-shade strong"></div>
+  <div class="panel story-panel">
+    <h2>THE LEGEND</h2>
+    <p>Deep in a forgotten jungle lies a temple no map remembers. Inside, on an altar of black stone, rests the <b>Golden Relic</b> &mdash; a treasure older than kingdoms.</p>
+    <p>You are a fearless treasure hunter. You found it. You took it.</p>
+    <p>The ground shook. Stone cracked. An <b>ancient Guardian</b> tore itself free from the temple walls, its eyes burning red&hellip;</p>
+    <p>Now you must <b>RUN</b> &mdash; through the <span class="z1">Whispering Jungle</span>, the <span class="z2">Ancient Temple</span>, the <span class="z3">Abandoned City</span> and the <span class="z4">Underground Tunnels</span>. Grab every coin, dodge every trap, and never stop.</p>
+    <p class="em">How long can you survive the Infinite Chase?</p>
+    <button class="btn btn-gold" data-close="story" id="btnStoryGo">BEGIN THE CHASE</button>
+  </div>
+</div>
+
+<!-- ================= HOW TO ================= -->
+<div id="help" class="screen modal">
+  <div class="cover-shade strong solid"></div>
+  <div class="panel">
+    <h2>HOW TO PLAY</h2>
+    <div class="help-grid">
+      <div class="hg"><span class="k">← →</span><span>Swipe left / right to change lanes</span></div>
+      <div class="hg"><span class="k">↰ ↱</span><span>Swipe left / right at a corner to <b>turn</b> &mdash; miss it and you crash!</span></div>
+      <div class="hg"><span class="k">↑</span><span>Swipe up to <b>jump</b> over logs, walls and broken floor</span></div>
+      <div class="hg"><span class="k">↓</span><span>Swipe down to <b>slide</b> under beams and fire traps</span></div>
+      <div class="hg"><span class="k orb o-magnet"></span><span><b>Magnet</b> pulls in nearby coins</span></div>
+      <div class="hg"><span class="k orb o-shield"></span><span><b>Relic Shield</b> saves you from one deadly hit</span></div>
+      <div class="hg"><span class="k orb o-double"></span><span><b>Double Gold</b> &mdash; every coin counts twice</span></div>
+      <div class="hg"><span class="k">!</span><span>Bumping a wall makes you stumble. Stumble twice quickly and the Guardian catches you!</span></div>
+    </div>
+    <p class="small">Keyboard: Arrow keys / WASD, Space = jump, P = pause</p>
+    <button class="btn btn-gold" data-close="help">GOT IT</button>
+  </div>
+</div>
+
+<!-- ================= SHOP ================= -->
+<div id="shop" class="screen modal">
+  <div class="cover-shade strong solid"></div>
+  <div class="shop-wrap">
+    <div class="shop-head">
+      <button class="icon-btn" data-close="shop" aria-label="Back">✕</button>
+      <h2>TREASURE SHOP</h2>
+      <div class="pill"><i class="coin-ico"></i><span id="sCoins">0</span></div>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="chars">EXPLORERS</button>
+      <button class="tab" data-tab="upg">POWER-UPS</button>
+    </div>
+    <div class="shop-list" id="shopList"></div>
+  </div>
+</div>
+
+<!-- ================= PAUSE ================= -->
+<div id="pause" class="screen modal">
+  <div class="cover-shade strong"></div>
+  <div class="panel center">
+    <h2>PAUSED</h2>
+    <button class="btn btn-gold" id="btnResume">RESUME</button>
+    <button class="btn" id="btnRestart">RESTART</button>
+    <button class="btn" id="btnQuit">MAIN MENU</button>
+  </div>
+</div>
+
+<!-- ================= GAME OVER ================= -->
+<div id="over" class="screen modal">
+  <div class="cover-shade strong"></div>
+  <div class="panel center">
+    <h2 id="oTitle">CAUGHT!</h2>
+    <div class="o-sub" id="oSub"></div>
+    <div class="new-best" id="oBest">NEW BEST!</div>
+    <div class="stats">
+      <div><small>SCORE</small><b id="oScore">0</b></div>
+      <div><small>DISTANCE</small><b id="oDist">0 m</b></div>
+      <div><small>COINS</small><b id="oCoins">0</b></div>
+    </div>
+    <button class="btn btn-revive" id="btnRevive">REVIVE <i class="coin-ico"></i><span id="oReviveCost">250</span></button>
+    <button class="btn btn-gold" id="btnAgain">RUN AGAIN</button>
+    <button class="btn" id="btnMenu">MAIN MENU</button>
+  </div>
+</div>
+
+<div id="loading" class="screen show"><div class="spinner"></div></div>
+
+<script src="three.min.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
