@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hotel TV Admin</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <div id="login" class="login hidden">
+    <form id="login-form" class="login-card">
+      <h1>হোটেল টিভি</h1>
+      <p class="muted">অ্যাডমিন প্যানেলে লগইন করুন</p>
+      <label>ইউজারনেম<input name="username" autocomplete="username" required></label>
+      <label>পাসওয়ার্ড<input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="btn primary" type="submit">লগইন</button>
+      <div class="err" id="login-err"></div>
+    </form>
+  </div>
+
+  <div id="app" class="hidden">
+    <header class="bar">
+      <button class="menu-btn" id="menu-btn" aria-label="মেনু">☰</button>
+      <div class="logo">হোটেল টিভি <span class="muted">অ্যাডমিন</span></div>
+      <div class="spacer"></div>
+      <span id="live" class="live" title="সার্ভারের সাথে লাইভ সংযোগ"></span>
+      <span id="who" class="muted"></span>
+      <button class="btn ghost" id="pw-btn">পাসওয়ার্ড</button>
+      <button class="btn ghost" id="logout-btn">লগআউট</button>
+    </header>
+    <nav id="nav" class="nav"></nav>
+    <main id="page" class="page"></main>
+  </div>
+
+  <dialog id="dlg"><form method="dialog" id="dlg-form"></form></dialog>
+  <div id="toast" class="toast hidden"></div>
+  <audio id="ding" preload="auto"></audio>
+  <script src="admin.js"></script>
+</body>
+</html>
