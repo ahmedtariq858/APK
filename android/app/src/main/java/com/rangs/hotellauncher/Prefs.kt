@@ -13,12 +13,18 @@ class Prefs(context: Context) {
     private val cache: SharedPreferences = ctx.getSharedPreferences("guest_cache", Context.MODE_PRIVATE)
 
     var room: String
-        get() = sp.getString("room", "") ?: ""
+        get() = sp.getString("room", null) ?: if (standalone) "101" else ""
         set(v) = sp.edit().putString("room", v).apply()
 
     var serverUrl: String
         get() = sp.getString("serverUrl", BuildConfig.DEFAULT_SERVER) ?: ""
         set(v) = sp.edit().putString("serverUrl", v.trimEnd('/')).apply()
+
+    /** No hotel server configured: this TV runs the server itself (admin panel at http://<tv-ip>:8080/admin/). */
+    val standalone: Boolean get() = serverUrl.isBlank() || serverUrl == "local"
+
+    /** The address the guest screen talks to. */
+    val effectiveServer: String get() = if (standalone) "http://127.0.0.1:${LocalServer.PORT}" else serverUrl
 
     var maxVolume: Int
         get() = sp.getInt("maxVolume", 100)

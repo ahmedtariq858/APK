@@ -1,0 +1,383 @@
+{
+ "content": {
+  "hotelName": {
+   "bn": "হোটেল সোনারগাঁও প্যালেস",
+   "en": "Sonargaon Palace Hotel"
+  },
+  "welcome": {
+   "bn": "আপনার থাকা আনন্দময় হোক",
+   "en": "We hope you enjoy your stay"
+  },
+  "logo": "",
+  "background": "",
+  "wifi": {
+   "ssid": "Hotel-Guest",
+   "password": "welcome123"
+  },
+  "receptionPhone": "0",
+  "checkoutTime": "12:00",
+  "services": [
+   {
+    "icon": "🍽",
+    "name": {
+     "bn": "রেস্টুরেন্ট",
+     "en": "Restaurant"
+    },
+    "hours": "07:00 – 23:00",
+    "note": {
+     "bn": "নিচতলা",
+     "en": "Ground floor"
+    }
+   },
+   {
+    "icon": "🏊",
+    "name": {
+     "bn": "সুইমিং পুল",
+     "en": "Swimming pool"
+    },
+    "hours": "06:00 – 21:00",
+    "note": {
+     "bn": "ছাদ",
+     "en": "Rooftop"
+    }
+   },
+   {
+    "icon": "🏋",
+    "name": {
+     "bn": "জিম",
+     "en": "Gym"
+    },
+    "hours": "24 ঘণ্টা / 24 hours",
+    "note": {
+     "bn": "২য় তলা",
+     "en": "2nd floor"
+    }
+   },
+   {
+    "icon": "💆",
+    "name": {
+     "bn": "স্পা",
+     "en": "Spa"
+    },
+    "hours": "10:00 – 20:00",
+    "note": {
+     "bn": "আগে বুকিং দিন",
+     "en": "Booking required"
+    }
+   },
+   {
+    "icon": "👕",
+    "name": {
+     "bn": "লন্ড্রি",
+     "en": "Laundry"
+    },
+    "hours": "08:00 – 18:00",
+    "note": {
+     "bn": "রিসেপশনে ফোন করুন",
+     "en": "Call reception"
+    }
+   }
+  ],
+  "nearby": [
+   {
+    "icon": "🏛",
+    "name": {
+     "bn": "জাতীয় জাদুঘর",
+     "en": "National Museum"
+    },
+    "distance": "2.5 km"
+   },
+   {
+    "icon": "🛍",
+    "name": {
+     "bn": "বসুন্ধরা সিটি",
+     "en": "Bashundhara City"
+    },
+    "distance": "1.8 km"
+   },
+   {
+    "icon": "🏥",
+    "name": {
+     "bn": "স্কয়ার হাসপাতাল",
+     "en": "Square Hospital"
+    },
+    "distance": "1.2 km"
+   },
+   {
+    "icon": "🌳",
+    "name": {
+     "bn": "রমনা পার্ক",
+     "en": "Ramna Park"
+    },
+    "distance": "3.0 km"
+   }
+  ],
+  "liveTv": {
+   "mode": "tuner",
+   "package": "",
+   "channels": []
+  }
+ },
+ "tv": {
+  "pin": "1234",
+  "combo": [
+   "ArrowUp",
+   "ArrowUp",
+   "ArrowDown",
+   "ArrowDown",
+   "ArrowLeft",
+   "ArrowRight",
+   "Enter"
+  ],
+  "maxVolume": 80,
+  "clearPackages": [
+   "com.netflix.ninja",
+   "com.google.android.youtube.tv"
+  ],
+  "kiosk": false
+ },
+ "menu": [
+  {
+   "id": 1,
+   "category": "নাস্তা / Breakfast",
+   "name_bn": "পরোটা ও ডিম ভাজি",
+   "name_en": "Paratha & omelette",
+   "description_bn": "",
+   "description_en": "",
+   "price": 250,
+   "image": null,
+   "available": true,
+   "sort": 0
+  },
+  {
+   "id": 2,
+   "category": "নাস্তা / Breakfast",
+   "name_bn": "কন্টিনেন্টাল ব্রেকফাস্ট",
+   "name_en": "Continental breakfast",
+   "description_bn": "",
+   "description_en": "",
+   "price": 550,
+   "image": null,
+   "available": true,
+   "sort": 1
+  },
+  {
+   "id": 3,
+   "category": "প্রধান খাবার / Mains",
+   "name_bn": "কাচ্চি বিরিয়ানি",
+   "name_en": "Kacchi biryani",
+   "description_bn": "",
+   "description_en": "",
+   "price": 650,
+   "image": null,
+   "available": true,
+   "sort": 2
+  },
+  {
+   "id": 4,
+   "category": "প্রধান খাবার / Mains",
+   "name_bn": "চিকেন কারি ও ভাত",
+   "name_en": "Chicken curry & rice",
+   "description_bn": "",
+   "description_en": "",
+   "price": 480,
+   "image": null,
+   "available": true,
+   "sort": 3
+  },
+  {
+   "id": 5,
+   "category": "প্রধান খাবার / Mains",
+   "name_bn": "ভেজিটেবল ফ্রাইড রাইস",
+   "name_en": "Vegetable fried rice",
+   "description_bn": "",
+   "description_en": "",
+   "price": 380,
+   "image": null,
+   "available": true,
+   "sort": 4
+  },
+  {
+   "id": 6,
+   "category": "পানীয় / Drinks",
+   "name_bn": "চা",
+   "name_en": "Tea",
+   "description_bn": "",
+   "description_en": "",
+   "price": 80,
+   "image": null,
+   "available": true,
+   "sort": 5
+  },
+  {
+   "id": 7,
+   "category": "পানীয় / Drinks",
+   "name_bn": "কফি",
+   "name_en": "Coffee",
+   "description_bn": "",
+   "description_en": "",
+   "price": 150,
+   "image": null,
+   "available": true,
+   "sort": 6
+  },
+  {
+   "id": 8,
+   "category": "পানীয় / Drinks",
+   "name_bn": "ফ্রেশ জুস",
+   "name_en": "Fresh juice",
+   "description_bn": "",
+   "description_en": "",
+   "price": 220,
+   "image": null,
+   "available": true,
+   "sort": 7
+  }
+ ],
+ "rooms": [
+  {
+   "number": "101",
+   "floor": "1",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "102",
+   "floor": "1",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "103",
+   "floor": "1",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "104",
+   "floor": "1",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "105",
+   "floor": "1",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "106",
+   "floor": "1",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "201",
+   "floor": "2",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "202",
+   "floor": "2",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "203",
+   "floor": "2",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "204",
+   "floor": "2",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "205",
+   "floor": "2",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "206",
+   "floor": "2",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "301",
+   "floor": "3",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "302",
+   "floor": "3",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "303",
+   "floor": "3",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "304",
+   "floor": "3",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "305",
+   "floor": "3",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  },
+  {
+   "number": "306",
+   "floor": "3",
+   "guest_name": null,
+   "language": "bn",
+   "checkin_at": null,
+   "checkout_at": null
+  }
+ ]
+}

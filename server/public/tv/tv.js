@@ -34,7 +34,8 @@
       serverUrl: location.protocol.startsWith('http') ? location.origin : '',
       room: q.get('room') || store.get('browserRoom', '101'),
       deviceId: id, versionName: 'web', versionCode: 0, model: navigator.userAgent.slice(0, 60),
-      isDeviceOwner: false, ip: ''
+      isDeviceOwner: false, ip: '',
+      standalone: q.get('standalone') === '1' // browser test of a TV that is its own server
     };
   }
   let cfg = loadConfig();
@@ -188,6 +189,7 @@
           <div class="chip"><div class="k">${t('checkout')}</div><div class="v">${esc(checkout)}</div></div>
         </div>
       </div>
+      ${cfg.standalone && cfg.adminUrl ? `<div class="adminlink">অ্যাডমিন প্যানেল · Admin: <b>${esc(cfg.adminUrl)}</b></div>` : ''}
       <div class="tiles">
         ${TILES.map((x) => `<button class="tile f" data-tile="${x.id}">
           ${x.id === 'roomservice' && active ? `<span class="badge">${num(active)}</span>` : ''}
@@ -460,8 +462,11 @@
     viewEl.innerHTML = `${head('টিভি-অ্যাডমিন · TV admin')}
       <div class="form">
         <div class="field"><label>রুম নম্বর · Room</label><input class="f" data-key="room" id="in-room" value="${esc(cfg.room || '')}" inputmode="numeric"></div>
-        <div class="field"><label>সার্ভারের ঠিকানা · Server</label><input class="f" data-key="srv" id="in-srv" value="${esc(cfg.serverUrl || '')}" placeholder="http://192.168.1.10:8080"></div>
+        <div class="field"><label>সার্ভারের ঠিকানা · Server <span style="color:var(--gold)">(খালি = এই টিভিতেই সার্ভার)</span></label><input class="f" data-key="srv" id="in-srv" value="${esc(cfg.standalone ? '' : (cfg.serverUrl || ''))}" placeholder="খালি রাখুন · or http://192.168.1.10:8080"></div>
       </div>
+      ${cfg.standalone ? `<div class="box" style="margin-top:2.5vh;max-width:70vw"><div style="color:var(--muted)">অ্যাডমিন প্যানেল — একই Wi-Fi-তে ফোনের ব্রাউজারে খুলুন · Admin panel (same Wi-Fi):</div>
+        <div style="font-size:2rem;font-weight:700;color:var(--gold);margin-top:1vh">${esc(cfg.adminUrl || '')}</div>
+        <div style="color:var(--muted);margin-top:0.6vh">লগইন: admin / admin123 (প্রথমবার) — পরে পাসওয়ার্ড বদলান</div></div>` : ''}
       <div class="actions">
         <button class="btn primary f" data-key="save" data-act="save">সেভ ও সংযোগ পরীক্ষা</button>
         <button class="btn f" data-key="net" data-act="net">Wi-Fi / LAN</button>
@@ -485,15 +490,24 @@
     if (srv && !/^https?:\/\//.test(srv)) srv = 'http://' + srv;
     // A bare local IP ("192.168.1.10") means the server's default port; names and https URLs are kept as typed.
     if (/^http:\/\/\d+\.\d+\.\d+\.\d+$/.test(srv)) srv += ':8080';
+    if (A) {
+      // An empty server field = standalone: this TV runs the server itself.
+      A.setConfig(JSON.stringify({ room, serverUrl: srv }));
+      cfg = loadConfig();
+    } else {
+      cfg.room = room;
+      if (srv) cfg.serverUrl = srv;
+      store.set('browserRoom', room);
+    }
+    const target = apiBase();
+    if (cfg.standalone) await new Promise((r) => setTimeout(r, 400)); // give the built-in server a moment
     let msg;
     try {
-      const r = await fetch(srv + '/api/tv/state?room=' + encodeURIComponent(room) + '&device=' + encodeURIComponent(cfg.deviceId), { cache: 'no-store' });
+      const r = await fetch(target + '/api/tv/state?room=' + encodeURIComponent(room) + '&device=' + encodeURIComponent(cfg.deviceId), { cache: 'no-store' });
       const s = await r.json();
       msg = r.ok ? (s.known ? `✔ সংযোগ ঠিক আছে — রুম ${room} সার্ভারে আছে` : `⚠ সংযোগ ঠিক আছে, কিন্তু রুম ${room} সার্ভারের তালিকায় নেই`) : '✖ সার্ভার উত্তর দিয়েছে: ' + (s.error || r.status);
-    } catch (e) { msg = '✖ সার্ভারে পৌঁছানো যায়নি: ' + srv; }
-    cfg.room = room; cfg.serverUrl = srv;
-    if (A) A.setConfig(JSON.stringify({ room, serverUrl: srv }));
-    else store.set('browserRoom', room);
+      if (r.ok && cfg.standalone) msg += ' (এই টিভিই সার্ভার)';
+    } catch (e) { msg = '✖ সার্ভারে পৌঁছানো যায়নি: ' + target + ' — সার্ভারের ঘর খালি রাখলে এই টিভিই সার্ভার হবে'; }
     reconnect();
     viewRender = () => renderTvAdmin(msg);
     rerenderView('[data-key="save"]');
@@ -628,7 +642,7 @@
   }
   function connect() {
     clearTimeout(reconnectTimer);
-    if (!apiBase() || !cfg.room) { setConn(); return; }
+    if (!apiBase() || !cfg.room || cfg.standalone) { setConn(); return; }
     try { ws = new WebSocket(wsUrl()); } catch (e) { reconnectTimer = setTimeout(connect, 10000); return; }
     const me = ws;
     ws.onopen = () => { wsOk = true; setConn(); flushOutbox(); };
@@ -723,6 +737,7 @@
       } else { ok = false; message = 'unknown'; }
     } catch (e) { ok = false; message = String(e && e.message || e); }
     if (ws && wsOk) ws.send(JSON.stringify({ type: 'commandResult', id: c.id, command: c.command, ok, message }));
+    else if (apiBase()) fetch(apiBase() + '/api/tv/result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ room: cfg.room, id: c.id, command: c.command, ok, message }) }).catch(() => {});
   }
 
   // ---------------------------------------------------------------- sha256 (WebView on http has no crypto.subtle)
@@ -773,7 +788,8 @@
   if (!cfg.room || !apiBase()) openTvAdmin();
   connect();
   poll();
-  setInterval(() => { if (!wsOk) poll(); }, 30000);
+  // Standalone (this TV is the server): no WebSocket, so check every 3 s.
+  setInterval(() => { if (!wsOk) poll(); }, cfg.standalone ? 3000 : 30000);
   setInterval(() => {
     if (ws && wsOk) ws.send(JSON.stringify({ type: 'heartbeat', version: cfg.versionName }));
     flushOutbox();

@@ -17,6 +17,7 @@
   const toLocalInput = (ts) => { if (!ts) return ''; const d = new Date(ts); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 
   let me = null;
+  let standalone = false; // the TV itself is the server: no WebSocket, poll instead
   let warnings = {};
   let current = 'dashboard';
   let activeOrderCount = 0;
@@ -131,11 +132,11 @@
 
   async function start() {
     const r = await api('/me');
-    me = r.user; warnings = r.warnings || {};
+    me = r.user; warnings = r.warnings || {}; standalone = !!r.standalone;
     $('#who').textContent = `${me.displayName || me.username} · ${roleName(me.role)}`;
     $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
-    connectWs();
+    if (standalone) startPolling(); else connectWs();
     refreshOrderCount();
     go(location.hash.slice(1) || 'dashboard');
   }
@@ -178,6 +179,34 @@
       }
     };
   }
+  // Standalone mode: check every 5 s for new orders and refresh the live pages.
+  let pollTimer = null;
+  function startPolling() {
+    clearInterval(pollTimer);
+    $('#live').classList.add('on');
+    let lastIds = null;
+    pollTimer = setInterval(async () => {
+      if ($('#app').classList.contains('hidden')) return clearInterval(pollTimer);
+      try {
+        if (can('orders.view')) {
+          const { orders } = await api('/orders?scope=active');
+          const ids = orders.filter((o) => o.status === 'new').map((o) => o.id);
+          const fresh = lastIds ? orders.filter((o) => o.status === 'new' && !lastIds.includes(o.id)) : [];
+          lastIds = ids;
+          activeOrderCount = ids.length;
+          renderNav();
+          if (fresh.length) {
+            ding();
+            toast(`🔔 রুম ${fresh[0].room} থেকে নতুন অর্ডার — ${taka(fresh[0].total)}`, 6000);
+            if (current === 'orders') go('orders');
+          }
+        }
+        if (current === 'dashboard') go('dashboard');
+        $('#live').classList.add('on');
+      } catch (e) { $('#live').classList.remove('on'); }
+    }, 5000);
+  }
+
   let dashT = null;
   const debounceDash = () => { clearTimeout(dashT); dashT = setTimeout(() => current === 'dashboard' && go('dashboard'), 800); };
 

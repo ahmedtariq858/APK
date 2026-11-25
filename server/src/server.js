@@ -256,6 +256,14 @@ export function createServer(opts = {}) {
     res.json({ ok: true });
   }));
 
+  // Command results from TVs that poll instead of using the WebSocket.
+  tv.post('/result', wrap((req, res) => {
+    const { room, id, command, ok, message } = req.body || {};
+    notifyAdmins({ type: 'command.result', room, id, ok: !!ok, message: String(message || '').slice(0, 200) });
+    if (command === 'clearGuestData' && !ok) addAlert(room ? String(room) : null, 'clear_failed', 'অতিথির লগইন মোছা যায়নি (Device Owner চালু নেই?)');
+    res.json({ ok: true });
+  }));
+
   app.use('/api/tv', tv);
 
   // ---------- staff API ----------

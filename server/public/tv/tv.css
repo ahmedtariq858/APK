@@ -158,3 +158,6 @@ html, body {
 #conn.on { background: var(--ok); }
 #conn.off { background: var(--bad); }
 #player { position: fixed; inset: 0; width: 100%; height: 100%; background: #000; z-index: 25; }
+.adminlink { margin-top: auto; color: var(--muted); font-size: 1rem; }
+.adminlink b { color: var(--gold); font-weight: 600; }
+.adminlink + .tiles { margin-top: 1.6vh; }

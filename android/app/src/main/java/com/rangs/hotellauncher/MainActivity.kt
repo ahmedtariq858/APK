@@ -84,7 +84,10 @@ class MainActivity : Activity() {
 
     /** The server's live page when configured, otherwise the copy built into the APK. */
     fun loadStartPage() {
-        val server = prefs.serverUrl
+        if (prefs.standalone) {
+            try { LocalServer.start(this) } catch (e: Exception) { Log.e(TAG, "local server", e) }
+        }
+        val server = prefs.effectiveServer
         pageFinished = false
         usingFallback = false
         if (server.isBlank()) {
@@ -123,7 +126,7 @@ class MainActivity : Activity() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url.toString()
             // Only the hotel's own pages may open inside the launcher.
-            val server = prefs.serverUrl
+            val server = prefs.effectiveServer
             val allowed = url.startsWith("file:///android_asset/") || (server.isNotBlank() && url.startsWith(server))
             if (allowed) {
                 usingFallback = false

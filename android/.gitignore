@@ -6,3 +6,4 @@ keystore.properties
 *.jks
 *.keystore
 app/src/main/assets/tv/
+app/src/main/assets/admin/

@@ -70,8 +70,9 @@ android {
 
 // The guest screen lives in ../server/public/tv. Bundle a copy into the APK so the
 // TV can show the welcome screen even when the server is unreachable at boot.
+// The admin panel is bundled too, for standalone mode (the TV runs the server itself).
 val copyGuestScreen by tasks.registering(Copy::class) {
-    from(rootProject.file("../server/public/tv"))
-    into(layout.projectDirectory.dir("src/main/assets/tv"))
+    from(rootProject.file("../server/public")) { include("tv/**", "admin/**") }
+    into(layout.projectDirectory.dir("src/main/assets"))
 }
 tasks.named("preBuild") { dependsOn(copyGuestScreen) }
