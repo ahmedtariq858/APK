@@ -16,14 +16,12 @@ class BootReceiver : BroadcastReceiver() {
         // A temporary exit ("অ্যাপ থেকে বের হন") lasts only until the TV restarts.
         if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) prefs.exitedOnBoot = ""
         Launcher.setHomeEnabled(context, true)
-        try {
-            context.startActivity(
-                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        } catch (e: Exception) {
-            // Android 10+ may block starts from the background; as the Home app it opens anyway.
-            Log.i("HotelLauncher", "boot start skipped: ${e.message}")
-        }
+        // The service watches for the TV waking from standby and keeps the built-in server running.
+        KeepAliveService.start(context)
+        // Open the hotel screen now. Allowed on Android 10+ only with Device Owner or
+        // "Display over other apps"; as the default Home app it also opens on its own.
+        KeepAliveService.bringToFront(context, "boot")
+        if (!KeepAliveService.canAutoStart(context)) Log.i("HotelLauncher", "auto-start needs Display-over-apps or Device Owner")
     }
 }
 

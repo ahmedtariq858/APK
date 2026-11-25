@@ -100,6 +100,21 @@ class Bridge(private val a: MainActivity) {
 
     // ---------------------------------------------------------------- launcher role
 
+    /** What is still needed for the hotel screen to be the TV's main screen and open by itself. */
+    @JavascriptInterface
+    fun getSetupStatus(): String = JSONObject().apply {
+        put("isDefaultHome", a.isDefaultHome())
+        put("canAutoStart", KeepAliveService.canAutoStart(a))
+        put("isDeviceOwner", Launcher.isDeviceOwner(a))
+        put("sdk", Build.VERSION.SDK_INT)
+    }.toString()
+
+    @JavascriptInterface
+    fun requestHomeRole(): Boolean { var ok = false; val l = CountDownLatch(1); a.runOnUiThread { ok = a.requestHomeRole(); l.countDown() }; l.await(3, TimeUnit.SECONDS); return ok }
+
+    @JavascriptInterface
+    fun requestAutoStart(): Boolean { var ok = false; val l = CountDownLatch(1); a.runOnUiThread { ok = a.requestAutoStart(); l.countDown() }; l.await(3, TimeUnit.SECONDS); return ok }
+
     @JavascriptInterface
     fun exitLauncher(): Boolean { a.runOnUiThread { a.leave(permanent = false) }; return true }
 

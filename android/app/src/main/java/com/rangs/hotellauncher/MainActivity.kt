@@ -79,7 +79,52 @@ class MainActivity : Activity() {
         volumeGuard.start()
 
         Launcher.applyOwnerPolicies(this, prefs)
+        KeepAliveService.start(this)
         loadStartPage()
+        firstRunSetup()
+    }
+
+    // ---------------------------------------------------------------- become the TV's main screen
+
+    /** Is this app the TV's default Home app (what the Home button and power-on open)? */
+    fun isDefaultHome(): Boolean {
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        return packageManager.resolveActivity(home, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+            ?.activityInfo?.packageName == packageName
+    }
+
+    /** Ask Android to make this the Home app (Android 10+ role dialog, else the Home chooser). */
+    fun requestHomeRole(): Boolean {
+        if (isDefaultHome()) return true
+        if (Build.VERSION.SDK_INT >= 29) {
+            val rm = getSystemService(android.app.role.RoleManager::class.java)
+            if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME)) {
+                try { startActivityForResult(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_HOME), 41); return true } catch (e: Exception) { Log.w(TAG, "role", e) }
+            }
+        }
+        for (i in listOf(Intent(android.provider.Settings.ACTION_HOME_SETTINGS),
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))) {
+            try { startActivity(i); return true } catch (e: Exception) { /* try next */ }
+        }
+        return false
+    }
+
+    /** Open "Display over other apps" for this app, needed on Android 10+ to auto-open on boot / wake. */
+    fun requestAutoStart(): Boolean {
+        if (KeepAliveService.canAutoStart(this)) return true
+        return try {
+            startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
+            true
+        } catch (e: Exception) { false }
+    }
+
+    /** First time the app is opened: ask once to become the Home app. */
+    private fun firstRunSetup() {
+        if (Launcher.isDeviceOwner(this) || prefs.permanentlyDisabled) return
+        val sp = getSharedPreferences("launcher", MODE_PRIVATE)
+        if (sp.getBoolean("askedHome", false)) return
+        sp.edit().putBoolean("askedHome", true).apply()
+        if (!isDefaultHome()) main.postDelayed({ requestHomeRole() }, 1500)
     }
 
     /** The server's live page when configured, otherwise the copy built into the APK. */
@@ -149,6 +194,7 @@ class MainActivity : Activity() {
         hideSystemUi()
         if (::web.isInitialized) {
             web.onResume()
+            js("window.HotelTV && HotelTV.resumed && HotelTV.resumed()")
             if (prefs.kiosk) startKioskIfAllowed()
         }
     }

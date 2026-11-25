@@ -476,11 +476,32 @@
         <button class="btn danger f" data-key="disable" data-act="disable">স্থায়ীভাবে লঞ্চার বন্ধ</button>
         ${info.homeEnabled === false ? '<button class="btn f" data-key="enable" data-act="enable">লঞ্চার আবার চালু</button>' : ''}
       </div>
+      ${setupBox()}
       <div class="info">${msg ? `<div style="color:var(--gold)">${esc(msg)}</div>` : ''}
         ভার্সন: ${esc(cfg.versionName)} (${esc(cfg.versionCode)}) · আইপি: ${esc(info.ip || cfg.ip || '—')} · ডিভাইস: ${esc(cfg.deviceId)}<br>
         শেষ সিঙ্ক: ${lastSync ? esc(new Date(lastSync).toLocaleString('en-GB')) : '—'} · সংযোগ: ${wsOk ? 'WebSocket' : (lastPollOk ? 'polling' : 'নেই')}
         · Device Owner: ${info.isDeviceOwner ? 'হ্যাঁ' : 'না'} · ${esc(info.model || '')} · Android ${esc(info.sdk || '')}
       </div>`;
+  }
+  // What is still missing for the hotel screen to be the TV's main screen and to open by itself.
+  function setupStatus() {
+    if (!A || !A.getSetupStatus) return null;
+    return safeJson(A.getSetupStatus());
+  }
+  function setupBox() {
+    const st = setupStatus();
+    if (!st) return '';
+    const row = (ok, label, act, btn) => `<div class="line" style="align-items:center"><b>${ok ? '✔' : '✖'} ${label}</b>
+      ${ok ? '<span style="color:var(--ok)">চালু</span>' : `<button class="btn primary f" data-key="${act}" data-act="${act}">${btn}</button>`}</div>`;
+    const all = st.isDefaultHome && st.canAutoStart;
+    return `<div class="box" style="margin-top:2.5vh;max-width:80vw">
+      <h3>${all ? '✔ হোটেল স্ক্রিনই টিভির মূল স্ক্রিন' : 'টিভির মূল স্ক্রিন বানাতে বাকি আছে'}</h3>
+      ${row(st.isDefaultHome, 'Home অ্যাপ (Home বোতাম চাপলে হোটেল স্ক্রিন)', 'sethome', 'Home অ্যাপ বানান')}
+      ${row(st.canAutoStart, 'টিভি চালু হলে নিজে খুলবে (Display over other apps)', 'setauto', 'অনুমতি দিন')}
+      ${all ? '' : `<div style="color:var(--muted);margin-top:1vh;line-height:1.6">বোতামে কাজ না হলে কম্পিউটার বা ফোন থেকে একবার:<br>
+        <code>adb shell appops set com.rangs.hotellauncher SYSTEM_ALERT_WINDOW allow</code><br>
+        <code>adb shell cmd package set-home-activity com.rangs.hotellauncher/.HomeAlias</code></div>`}
+    </div>`;
   }
   const safeJson = (s) => { try { return JSON.parse(s); } catch (e) { return {}; } };
 
@@ -580,6 +601,8 @@
     else if (act === 'net') { if (!(A && A.openNetworkSettings())) toast('শুধু টিভিতে কাজ করে'); }
     else if (act === 'settings') { if (!(A && A.openSettings())) toast('শুধু টিভিতে কাজ করে'); }
     else if (act === 'reload') location.reload();
+    else if (act === 'sethome') { if (!A.requestHomeRole()) toast('এই টিভিতে সেটিংস খোলা যায়নি — নিচের adb কমান্ড দিন'); }
+    else if (act === 'setauto') { if (!A.requestAutoStart()) toast('এই টিভিতে সেটিংস খোলা যায়নি — নিচের adb কমান্ড দিন'); }
     else if (act === 'exit') { reportAlert('exit', 'অ্যাপ থেকে বের হওয়া (টিভি রিস্টার্টে ফিরবে)'); if (!(A && A.exitLauncher())) toast('শুধু টিভিতে কাজ করে'); }
     else if (act === 'disable') { reportAlert('exit', 'লঞ্চার স্থায়ীভাবে বন্ধ করা হয়েছে'); if (!(A && A.disableLauncherPermanently())) toast('শুধু টিভিতে কাজ করে'); }
     else if (act === 'enable') { if (A) A.enableLauncher(); viewRender = () => renderTvAdmin('লঞ্চার আবার Home অ্যাপ হিসেবে চালু হয়েছে'); rerenderView(); }
@@ -781,11 +804,23 @@
     back,
     home: goHome,
     configChanged() { cfg = loadConfig(); reconnect(); renderAll(); },
+    resumed() { if (viewName === 'tvadmin') { viewRender = () => renderTvAdmin(); rerenderView(); } },
     _sha256: sha256
   };
 
   renderAll();
   if (!cfg.room || !apiBase()) openTvAdmin();
+  else {
+    const st = setupStatus();
+    if (st && !(st.isDefaultHome && st.canAutoStart) && !store.get('setupShown', false)) {
+      store.set('setupShown', true);
+      openTvAdmin();
+    }
+  }
+  // Coming back from Android's settings screens: refresh the checklist.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && viewName === 'tvadmin') { viewRender = () => renderTvAdmin(); rerenderView(); }
+  });
   connect();
   poll();
   // Standalone (this TV is the server): no WebSocket, so check every 3 s.
