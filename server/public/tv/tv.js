@@ -483,7 +483,8 @@
     const room = $('#in-room').value.trim();
     let srv = $('#in-srv').value.trim().replace(/\/+$/, '');
     if (srv && !/^https?:\/\//.test(srv)) srv = 'http://' + srv;
-    if (srv && !/:\d+$/.test(srv.replace(/^https?:\/\//, ''))) srv += ':8080';
+    // A bare local IP ("192.168.1.10") means the server's default port; names and https URLs are kept as typed.
+    if (/^http:\/\/\d+\.\d+\.\d+\.\d+$/.test(srv)) srv += ':8080';
     let msg;
     try {
       const r = await fetch(srv + '/api/tv/state?room=' + encodeURIComponent(room) + '&device=' + encodeURIComponent(cfg.deviceId), { cache: 'no-store' });
