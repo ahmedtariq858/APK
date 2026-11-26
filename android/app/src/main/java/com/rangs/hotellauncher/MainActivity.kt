@@ -123,6 +123,15 @@ class MainActivity : Activity() {
         return false
     }
 
+    /** Open Accessibility settings so staff can switch on the Home-button guard. */
+    fun requestHomeGuard(): Boolean {
+        if (HomeGuardService.isEnabled(this)) return true
+        for (i in listOf(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS), Intent(android.provider.Settings.ACTION_SETTINGS))) {
+            try { startActivity(i); return true } catch (e: Exception) { /* next */ }
+        }
+        return false
+    }
+
     /** First time the app is opened: ask once to become the Home app. */
     private fun firstRunSetup() {
         if (Launcher.isDeviceOwner(this) || prefs.permanentlyDisabled) return

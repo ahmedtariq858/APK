@@ -104,6 +104,7 @@ class Bridge(private val a: MainActivity) {
     @JavascriptInterface
     fun getSetupStatus(): String = JSONObject().apply {
         put("isDefaultHome", a.isDefaultHome())
+        put("homeGuard", HomeGuardService.isEnabled(a))
         put("canAutoStart", KeepAliveService.canAutoStart(a))
         put("isDeviceOwner", Launcher.isDeviceOwner(a))
         put("sdk", Build.VERSION.SDK_INT)
@@ -111,6 +112,9 @@ class Bridge(private val a: MainActivity) {
 
     @JavascriptInterface
     fun requestHomeRole(): Boolean { var ok = false; val l = CountDownLatch(1); a.runOnUiThread { ok = a.requestHomeRole(); l.countDown() }; l.await(3, TimeUnit.SECONDS); return ok }
+
+    @JavascriptInterface
+    fun requestHomeGuard(): Boolean { var ok = false; val l = CountDownLatch(1); a.runOnUiThread { ok = a.requestHomeGuard(); l.countDown() }; l.await(3, TimeUnit.SECONDS); return ok }
 
     @JavascriptInterface
     fun requestAutoStart(): Boolean { var ok = false; val l = CountDownLatch(1); a.runOnUiThread { ok = a.requestAutoStart(); l.countDown() }; l.await(3, TimeUnit.SECONDS); return ok }

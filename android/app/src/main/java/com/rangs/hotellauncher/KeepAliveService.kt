@@ -42,7 +42,7 @@ class KeepAliveService : Service() {
 
         /** Can this app open its screen from the background (boot, wake)? */
         fun canAutoStart(c: Context): Boolean =
-            Build.VERSION.SDK_INT < 29 || Launcher.isDeviceOwner(c) || android.provider.Settings.canDrawOverlays(c)
+            Build.VERSION.SDK_INT < 29 || Launcher.isDeviceOwner(c) || android.provider.Settings.canDrawOverlays(c) || HomeGuardService.isEnabled(c)
 
         /** Bring the hotel screen to the front unless staff stepped out of the launcher. */
         fun bringToFront(c: Context, reason: String) {
@@ -65,7 +65,7 @@ class KeepAliveService : Service() {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             // Give the TV a moment to finish waking (some boards switch to the last input first).
-            main.postDelayed({ bringToFront(context, "screen_on") }, 1500)
+            main.postDelayed({ bringToFront(context, "screen_on") }, 400)
         }
     }
 

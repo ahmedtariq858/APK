@@ -493,14 +493,17 @@
     if (!st) return '';
     const row = (ok, label, act, btn) => `<div class="line" style="align-items:center"><b>${ok ? '✔' : '✖'} ${label}</b>
       ${ok ? '<span style="color:var(--ok)">চালু</span>' : `<button class="btn primary f" data-key="${act}" data-act="${act}">${btn}</button>`}</div>`;
-    const all = st.isDefaultHome && st.canAutoStart;
-    return `<div class="box" style="margin-top:2.5vh;max-width:80vw">
+    const homeOk = st.isDefaultHome || st.homeGuard;
+    const all = homeOk && st.canAutoStart;
+    return `<div class="box" style="margin-top:2.5vh;max-width:86vw">
       <h3>${all ? '✔ হোটেল স্ক্রিনই টিভির মূল স্ক্রিন' : 'টিভির মূল স্ক্রিন বানাতে বাকি আছে'}</h3>
-      ${row(st.isDefaultHome, 'Home অ্যাপ (Home বোতাম চাপলে হোটেল স্ক্রিন)', 'sethome', 'Home অ্যাপ বানান')}
-      ${row(st.canAutoStart, 'টিভি চালু হলে নিজে খুলবে (Display over other apps)', 'setauto', 'অনুমতি দিন')}
-      ${all ? '' : `<div style="color:var(--muted);margin-top:1vh;line-height:1.6">বোতামে কাজ না হলে কম্পিউটার বা ফোন থেকে একবার:<br>
-        <code>adb shell appops set com.rangs.hotellauncher SYSTEM_ALERT_WINDOW allow</code><br>
-        <code>adb shell cmd package set-home-activity com.rangs.hotellauncher/.HomeAlias</code></div>`}
+      ${row(st.homeGuard, 'Home বোতাম → হোটেল স্ক্রিন (Accessibility → Hotel Launcher চালু করুন)', 'setguard', 'Accessibility খুলুন')}
+      ${row(st.canAutoStart, 'টিভি চালু হলে নিজে খুলবে', 'setauto', 'অনুমতি দিন')}
+      ${st.homeGuard ? '' : row(st.isDefaultHome, 'Home অ্যাপ (কিছু টিভিতে এটা কাজ করে না, তখন উপরেরটা চালু করুন)', 'sethome', 'Home অ্যাপ বানান')}
+      ${all ? '' : `<div style="color:var(--muted);margin-top:1vh;line-height:1.6">Accessibility-তে Hotel Launcher ধূসর (বন্ধ করা) দেখালে: Settings → Apps → Hotel Launcher → ⋮ → <b>Allow restricted settings</b>, তারপর আবার চেষ্টা করুন।<br>
+        বোতামে কাজ না হলে কম্পিউটার থেকে একবার:<br>
+        <code>adb shell settings put secure enabled_accessibility_services com.rangs.hotellauncher/.HomeGuardService</code><br>
+        <code>adb shell settings put secure accessibility_enabled 1</code></div>`}
     </div>`;
   }
   const safeJson = (s) => { try { return JSON.parse(s); } catch (e) { return {}; } };
@@ -602,6 +605,7 @@
     else if (act === 'settings') { if (!(A && A.openSettings())) toast('শুধু টিভিতে কাজ করে'); }
     else if (act === 'reload') location.reload();
     else if (act === 'sethome') { if (!A.requestHomeRole()) toast('এই টিভিতে সেটিংস খোলা যায়নি — নিচের adb কমান্ড দিন'); }
+    else if (act === 'setguard') { if (!A.requestHomeGuard()) toast('এই টিভিতে সেটিংস খোলা যায়নি — নিচের adb কমান্ড দিন'); }
     else if (act === 'setauto') { if (!A.requestAutoStart()) toast('এই টিভিতে সেটিংস খোলা যায়নি — নিচের adb কমান্ড দিন'); }
     else if (act === 'exit') { reportAlert('exit', 'অ্যাপ থেকে বের হওয়া (টিভি রিস্টার্টে ফিরবে)'); if (!(A && A.exitLauncher())) toast('শুধু টিভিতে কাজ করে'); }
     else if (act === 'disable') { reportAlert('exit', 'লঞ্চার স্থায়ীভাবে বন্ধ করা হয়েছে'); if (!(A && A.disableLauncherPermanently())) toast('শুধু টিভিতে কাজ করে'); }
@@ -812,8 +816,8 @@
   if (!cfg.room || !apiBase()) openTvAdmin();
   else {
     const st = setupStatus();
-    if (st && !(st.isDefaultHome && st.canAutoStart) && !store.get('setupShown', false)) {
-      store.set('setupShown', true);
+    if (st && !((st.isDefaultHome || st.homeGuard) && st.canAutoStart) && !store.get('setupShown2', false)) {
+      store.set('setupShown2', true);
       openTvAdmin();
     }
   }

@@ -3,4 +3,6 @@
     <string name="app_name">Hotel Launcher</string>
     <string name="admin_label">Hotel Launcher (Device Owner)</string>
     <string name="admin_desc">চেক-আউটে অতিথির লগইন মোছা, Kiosk লক আর নিঃশব্দ আপডেটের জন্য।</string>
+    <string name="guard_label">Hotel Launcher — Home বোতাম</string>
+    <string name="guard_desc">রিমোটের Home বোতাম চাপলে আর টিভি চালু হলে হোটেল স্ক্রিন খোলে। স্টাফ লঞ্চার থেকে বের হলে এটা কিছু করে না।</string>
 </resources>
