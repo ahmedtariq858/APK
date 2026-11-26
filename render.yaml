@@ -1,0 +1,18 @@
+# One-click cloud demo on Render (https://render.com): New → Blueprint → pick this repository.
+# Free plan: the service sleeps after ~15 minutes without visitors (first visit then takes ~1 minute)
+# and its data is reset whenever it restarts or redeploys — fine for a demo, not for a real hotel.
+services:
+  - type: web
+    name: hotel-tv
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: server
+    buildCommand: npm install --no-audit --no-fund
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.14.0
+      - key: ADMIN_PASSWORD
+        sync: false   # Render asks for it when you create the service
