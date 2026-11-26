@@ -21,7 +21,18 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putString("serverUrl", v.trimEnd('/')).apply()
 
     /** No hotel server configured: this TV runs the server itself (admin panel at http://<tv-ip>:8080/admin/). */
-    val standalone: Boolean get() = serverUrl.isBlank() || serverUrl == "local"
+    val standalone: Boolean get() = serverUrl.isBlank() || serverUrl == "local" || isOwnAddress(serverUrl)
+
+    /** True when [url] points at this TV itself (its own Wi-Fi/LAN IP, localhost). */
+    private fun isOwnAddress(url: String): Boolean {
+        val host = try { java.net.URI(if (url.contains("://")) url else "http://$url").host } catch (e: Exception) { null } ?: return false
+        if (host == "localhost" || host.startsWith("127.")) return true
+        return try {
+            java.net.NetworkInterface.getNetworkInterfaces().toList()
+                .flatMap { it.inetAddresses.toList() }
+                .any { it.hostAddress == host }
+        } catch (e: Exception) { false }
+    }
 
     /** The address the guest screen talks to. */
     val effectiveServer: String get() = if (standalone) "http://127.0.0.1:${LocalServer.PORT}" else serverUrl

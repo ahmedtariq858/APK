@@ -112,10 +112,15 @@ class MainActivity : Activity() {
     /** Open "Display over other apps" for this app, needed on Android 10+ to auto-open on boot / wake. */
     fun requestAutoStart(): Boolean {
         if (KeepAliveService.canAutoStart(this)) return true
-        return try {
-            startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
-            true
-        } catch (e: Exception) { false }
+        val tries = listOf(
+            Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")),
+            Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION),
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$packageName"))
+        )
+        for (i in tries) {
+            try { startActivity(i); return true } catch (e: Exception) { /* this TV hides it; try the next screen */ }
+        }
+        return false
     }
 
     /** First time the app is opened: ask once to become the Home app. */
