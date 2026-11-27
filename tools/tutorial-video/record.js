@@ -13,13 +13,25 @@ const studioHtml = fs.readFileSync(path.join(OUT, 'studio.html'), 'utf8');
     recordVideo: { dir: path.join(OUT, 'raw'), size: { width: 1920, height: 1080 } }
   });
   const page = await context.newPage();
+  const t0 = Date.now();
+  const VOICE = JSON.parse(fs.readFileSync(path.join(OUT, 'voice/durations.json'), 'utf8'));
+  const timeline = [];
+  let narrEnd = 0;
+  const narrDone = async (extra = 0) => { const left = narrEnd - Date.now(); if (left > 0) await page.waitForTimeout(left); if (extra) await page.waitForTimeout(extra); };
+  const narrate = async (k) => {
+    const v = VOICE[k];
+    if (!v) { console.warn('no voice for', k); return; }
+    await narrDone(350);
+    timeline.push({ key: k, t: (Date.now() - t0) / 1000, file: v.file });
+    narrEnd = Date.now() + v.dur * 1000;
+  };
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.route('**/studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: studioHtml }));
   await page.goto(B + '/studio.html');
   await page.waitForTimeout(1500);
 
-  const S = (fn, ...a) => page.evaluate(([f, args]) => window.studio[f](...args), [fn, a]);
+  const S = async (fn, ...a) => { if (fn === 'cap') await narrate(a[1]); return page.evaluate(([f, args]) => window.studio[f](...args), [fn, a]); };
   const wait = (ms) => page.waitForTimeout(ms);
   const admin = () => page.frame({ name: 'admin' });
   const tv = () => page.frame({ name: 'tv' });
@@ -30,14 +42,15 @@ const studioHtml = fs.readFileSync(path.join(OUT, 'studio.html'), 'utf8');
   const tvText = (sel) => tv().locator(sel).first();
 
   // ------------------------------------------------------------ intro
+  await narrate('intro1');
   await S('card', `<div class="kicker">RANGS HOTEL TV</div><h1>হোটেল মোড টিউটোরিয়াল</h1>
     <p>অ্যাডমিন প্যানেলে (ব্যাকএন্ড) কিছু বদলালে কীভাবে সাথে সাথে টিভির অ্যাপে চলে যায় — আর হোটেল মোডের মূল ফিচারগুলো</p>`);
-  await wait(5000);
+  await narrate('intro2');
   await S('card', `<h1 style="font-size:64px">যা দেখবেন</h1><ul>
     <li>চেক-ইন: টিভিতে অতিথির নাম</li><li>কনটেন্ট বদলানো: হোটেলের নাম, Wi-Fi</li>
     <li>চলমান নোটিশ ও পপ-আপ বার্তা</li><li>রিমোট দিয়ে রুম সার্ভিস অর্ডার → কিচেন</li>
     <li>মেনু, ভাষা, টিভি-অ্যাডমিন পিন</li><li>ড্যাশবোর্ড, রিপোর্ট, টিভি নিয়ন্ত্রণ ও চেক-আউট</li></ul>`);
-  await wait(7000);
+  await narrDone(600);
   await S('card', '');
   await wait(800);
 
@@ -227,9 +240,11 @@ const studioHtml = fs.readFileSync(path.join(OUT, 'studio.html'), 'utf8');
   await wait(4500);
 
   // ------------------------------------------------------------ outro
+  await narrate('outro');
   await S('card', `<div class="kicker">RANGS HOTEL TV</div><h1>সব কিছু এক জায়গা থেকে</h1>
     <p>অ্যাডমিন প্যানেলে বদলান — হোটেলের সব টিভিতে কয়েক সেকেন্ডে পৌঁছে যায়।<br>ইন্টারনেট চলে গেলেও হোটেলের ভেতরের সার্ভারে সব চলে।</p>`);
-  await wait(6000);
+  await narrDone(1800);
+  fs.writeFileSync(path.join(OUT, 'timeline.json'), JSON.stringify(timeline, null, 1));
 
   const video = page.video();
   await context.close();

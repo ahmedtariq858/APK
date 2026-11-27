@@ -1,0 +1,6 @@
+voice/clips/
+voice/durations.json
+raw/
+*.webm
+*.mp4
+timeline.json
