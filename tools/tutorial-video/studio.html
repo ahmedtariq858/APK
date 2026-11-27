@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #0b1018; color: #f4f1ea;
+    font-family: "Noto Sans Bengali", "Hind Siliguri", system-ui, sans-serif; }
+  .top { position: absolute; left: 0; right: 0; top: 0; height: 64px; display: flex; align-items: center; padding: 0 36px;
+    background: linear-gradient(90deg, #141e2f, #0b1018); border-bottom: 1px solid #263248; }
+  .top .brand { font-size: 26px; font-weight: 700; color: #d9b26a; }
+  .top .step { margin-left: auto; font-size: 20px; color: #a9b2c3; }
+  .label { position: absolute; font-size: 18px; color: #a9b2c3; letter-spacing: .04em; }
+  .label b { color: #d9b26a; }
+  .frame { position: absolute; border-radius: 14px; overflow: hidden; border: 2px solid #263248; background: #000;
+    box-shadow: 0 20px 50px rgba(0,0,0,.5); transition: border-color .3s, box-shadow .3s; }
+  .frame.hot { border-color: #d9b26a; box-shadow: 0 0 0 6px rgba(217,178,106,.25), 0 20px 50px rgba(0,0,0,.5); }
+  .frame iframe { border: 0; transform-origin: 0 0; display: block; }
+  #admin { left: 36px; top: 118px; width: 936px; height: 742px; }
+  #admin iframe { width: 1170px; height: 928px; transform: scale(.8); }
+  #tv { left: 1000px; top: 118px; width: 884px; height: 501px; }
+  #tv iframe { width: 1920px; height: 1080px; transform: scale(.4604); }
+  .remote { position: absolute; left: 1000px; top: 640px; width: 884px; height: 220px; border-radius: 14px; border: 1px solid #263248;
+    background: #121a28; display: flex; align-items: center; gap: 28px; padding: 0 28px; }
+  .remote .k { min-width: 74px; height: 74px; border-radius: 16px; background: #1d2a40; border: 2px solid #33415c; display: grid; place-items: center;
+    font-size: 30px; font-weight: 700; color: #f4f1ea; transition: transform .1s, background .1s; padding: 0 12px; }
+  .remote .k.on { background: #d9b26a; color: #1b1307; transform: scale(1.12); border-color: #d9b26a; }
+  .remote .t { font-size: 20px; color: #a9b2c3; line-height: 1.5; flex: 1; }
+  .cap { position: absolute; left: 36px; right: 36px; bottom: 30px; height: 176px; border-radius: 16px; background: #141e2f; border: 1px solid #263248;
+    display: flex; align-items: center; gap: 26px; padding: 0 34px; }
+  .cap .num { flex: 0 0 auto; width: 92px; height: 92px; border-radius: 50%; background: #d9b26a; color: #1b1307; font-size: 42px; font-weight: 800; display: grid; place-items: center; }
+  .cap .tx h2 { margin: 0 0 6px; font-size: 38px; line-height: 1.2; }
+  .cap .tx p { margin: 0; font-size: 25px; color: #c8cfdb; line-height: 1.45; }
+  #card { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+    background: radial-gradient(ellipse at 30% 20%, #23324d 0%, #0b1018 65%); transition: opacity .6s; }
+  #card.hide { opacity: 0; pointer-events: none; }
+  #card .kicker { color: #d9b26a; font-size: 30px; letter-spacing: .12em; }
+  #card h1 { font-size: 92px; margin: 18px 0; line-height: 1.15; }
+  #card p { font-size: 34px; color: #c8cfdb; margin: 0; max-width: 1400px; line-height: 1.5; }
+  #card ul { list-style: none; padding: 0; margin: 40px 0 0; font-size: 32px; color: #f4f1ea; text-align: left; line-height: 1.8; }
+  #card li::before { content: "✦  "; color: #d9b26a; }
+  .flow { position: absolute; left: 960px; top: 470px; width: 60px; height: 60px; margin-left: -30px; border-radius: 50%; background: #d9b26a; color: #1b1307;
+    display: grid; place-items: center; font-size: 34px; font-weight: 800; opacity: 0; transition: opacity .3s; z-index: 5; }
+  .flow.on { opacity: 1; animation: pulse .9s ease-in-out infinite; }
+  @keyframes pulse { 50% { transform: scale(1.18); } }
+</style>
+</head>
+<body>
+  <div class="top"><div class="brand">Rangs হোটেল টিভি · টিউটোরিয়াল</div><div class="step" id="step"></div></div>
+  <div class="label" style="left:40px;top:84px"><b>অ্যাডমিন প্যানেল</b> · রিসেপশন / ফোন / কম্পিউটার (ব্যাকএন্ড)</div>
+  <div class="label" style="left:1004px;top:84px"><b>রুম ১০১-এর টিভি</b> · হোটেল মোড অ্যাপ</div>
+  <div class="frame" id="admin"><iframe name="admin" src="/admin/"></iframe></div>
+  <div class="frame" id="tv"><iframe name="tv" src="/tv/?room=101"></iframe></div>
+  <div class="flow" id="flow">➜</div>
+  <div class="remote">
+    <div class="k" data-k="ArrowLeft">←</div><div class="k" data-k="ArrowUp">↑</div><div class="k" data-k="ArrowDown">↓</div>
+    <div class="k" data-k="ArrowRight">→</div><div class="k" data-k="Enter">OK</div><div class="k" data-k="Escape">Back</div>
+    <div class="t" id="remote-t">টিভির রিমোট</div>
+  </div>
+  <div class="cap"><div class="num" id="num">১</div><div class="tx"><h2 id="h"></h2><p id="p"></p></div></div>
+  <div id="card"></div>
+<script>
+  const BN = '০১২৩৪৫৬৭৮৯';
+  window.studio = {
+    cap(n, h, p) {
+      document.getElementById('num').textContent = String(n).replace(/\d/g, (d) => BN[d]);
+      document.getElementById('h').textContent = h;
+      document.getElementById('p').textContent = p || '';
+      document.getElementById('step').textContent = 'ধাপ ' + String(n).replace(/\d/g, (d) => BN[d]);
+      document.getElementById('remote-t').textContent = 'টিভির রিমোট';
+    },
+    hot(which) {
+      for (const id of ['admin', 'tv']) document.getElementById(id).classList.toggle('hot', id === which);
+    },
+    flow(on) { document.getElementById('flow').classList.toggle('on', !!on); },
+    key(k) {
+      const el = document.querySelector(`.k[data-k="${k}"]`);
+      if (!el) return;
+      el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 260);
+    },
+    remote(t) { document.getElementById('remote-t').textContent = t; },
+    card(html) {
+      const c = document.getElementById('card');
+      if (html) { c.innerHTML = html; c.classList.remove('hide'); } else c.classList.add('hide');
+    }
+  };
+</script>
+</body>
+</html>
