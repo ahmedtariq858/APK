@@ -16,6 +16,7 @@ class BootReceiver : BroadcastReceiver() {
         // A temporary exit ("অ্যাপ থেকে বের হন") lasts only until the TV restarts.
         if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) prefs.exitedOnBoot = ""
         Launcher.setHomeEnabled(context, true)
+        HomeGuardService.ensureEnabled(context)
         // The service watches for the TV waking from standby and keeps the built-in server running.
         KeepAliveService.start(context)
         // Open the hotel screen now. Allowed on Android 10+ only with Device Owner or

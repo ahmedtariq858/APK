@@ -22,6 +22,28 @@ import android.view.accessibility.AccessibilityEvent
 class HomeGuardService : AccessibilityService() {
 
     companion object {
+        /**
+         * Some TVs (e.g. TCL Google TV) switch accessibility services off on every reboot.
+         * If the setup script granted WRITE_SECURE_SETTINGS
+         * (adb shell pm grant com.rangs.hotellauncher android.permission.WRITE_SECURE_SETTINGS),
+         * switch this service back on without touching any other enabled service.
+         */
+        fun ensureEnabled(c: Context) {
+            if (isEnabled(c)) return
+            if (c.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") != PackageManager.PERMISSION_GRANTED) return
+            val p = Prefs(c)
+            if (p.permanentlyDisabled) return
+            try {
+                val me = ComponentName(c, HomeGuardService::class.java).flattenToString()
+                val cur = Settings.Secure.getString(c.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+                val next = if (cur.isNullOrBlank() || cur == "null") me else "$cur:$me"
+                Settings.Secure.putString(c.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, next)
+                Settings.Secure.putInt(c.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+            } catch (e: Exception) {
+                android.util.Log.w("HotelGuard", "re-enable failed", e)
+            }
+        }
+
         fun isEnabled(c: Context): Boolean {
             val list = Settings.Secure.getString(c.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
             val me = ComponentName(c, HomeGuardService::class.java)

@@ -84,6 +84,7 @@ class KeepAliveService : Service() {
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         else startForeground(1, n)
 
+        HomeGuardService.ensureEnabled(this)
         registerReceiver(screenReceiver, IntentFilter(Intent.ACTION_SCREEN_ON).apply { addAction(Intent.ACTION_USER_PRESENT) })
 
         if (Prefs(this).standalone) {

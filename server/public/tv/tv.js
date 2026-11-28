@@ -501,7 +501,7 @@
       ${row(st.canAutoStart, 'টিভি চালু হলে নিজে খুলবে', 'setauto', 'অনুমতি দিন')}
       ${st.homeGuard ? '' : row(st.isDefaultHome, 'Home অ্যাপ (কিছু টিভিতে এটা কাজ করে না, তখন উপরেরটা চালু করুন)', 'sethome', 'Home অ্যাপ বানান')}
       ${all ? '' : `<div style="color:var(--muted);margin-top:1vh;line-height:1.6">Accessibility-তে Hotel Launcher ধূসর (বন্ধ করা) দেখালে: Settings → Apps → Hotel Launcher → ⋮ → <b>Allow restricted settings</b>, তারপর আবার চেষ্টা করুন।<br>
-        বোতামে কাজ না হলে কম্পিউটার থেকে একবার:<br>
+        সবচেয়ে সহজ: ল্যাপটপ থেকে <b>tools/tv-setup/setup-tv.bat</b> চালান — সব নিজে করে দেবে। অথবা হাতে:<br>
         <code>adb shell settings put secure enabled_accessibility_services com.rangs.hotellauncher/.HomeGuardService</code><br>
         <code>adb shell settings put secure accessibility_enabled 1</code></div>`}
     </div>`;

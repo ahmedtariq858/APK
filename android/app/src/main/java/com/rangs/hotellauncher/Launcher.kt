@@ -47,6 +47,7 @@ object Launcher {
         val query = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
         val homes = pm.queryIntentActivities(query, PackageManager.MATCH_DISABLED_COMPONENTS or PackageManager.MATCH_ALL)
             .map { it.activityInfo }
+            .filter { it.enabled && it.applicationInfo.enabled } // skip launchers turned off by the setup script
             .filter { it.packageName != c.packageName && it.packageName != "com.android.settings" && it.packageName != "com.android.tv.settings" }
         val pick = homes.minByOrNull { STOCK_HOMES.indexOf(it.packageName).let { i -> if (i < 0) 99 else i } } ?: return null
         return Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)

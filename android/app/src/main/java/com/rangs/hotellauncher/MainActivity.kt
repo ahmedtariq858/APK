@@ -80,6 +80,7 @@ class MainActivity : Activity() {
 
         Launcher.applyOwnerPolicies(this, prefs)
         KeepAliveService.start(this)
+        HomeGuardService.ensureEnabled(this)
         loadStartPage()
         firstRunSetup()
     }
@@ -252,9 +253,7 @@ class MainActivity : Activity() {
         val exited = prefs.permanentlyDisabled || prefs.exitedOnBoot == prefs.bootId()
         if (!isHome || !exited) return false
         val other = Launcher.otherHomeIntent(this) ?: return false
-        startActivity(other)
-        finish()
-        return true
+        return try { startActivity(other); finish(); true } catch (e: Exception) { false }
     }
 
     // ---------------------------------------------------------------- kiosk
@@ -284,9 +283,13 @@ class MainActivity : Activity() {
         } else {
             prefs.exitedOnBoot = prefs.bootId()
         }
+        // If the TV's own launcher was turned off by setup-tv.bat, open Settings instead
+        // (restore-tv.bat turns the TV's launcher back on).
         val other = Launcher.otherHomeIntent(this)
-        if (other != null) startActivity(other)
-        else startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val settings = Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try { startActivity(other ?: settings) } catch (e: Exception) {
+            try { startActivity(settings) } catch (e2: Exception) { Log.w(TAG, "leave", e2) }
+        }
         finish()
     }
 
