@@ -17,6 +17,7 @@
   const toLocalInput = (ts) => { if (!ts) return ''; const d = new Date(ts); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 
   let me = null;
+  let hotel = null; // the hotel being managed (super admin: the one entered)
   let standalone = false; // the TV itself is the server: no WebSocket, poll instead
   let warnings = {};
   let current = 'dashboard';
@@ -32,6 +33,7 @@
     const r = await fetch('/api' + path, init);
     const data = await r.json().catch(() => ({}));
     if (r.status === 401 && path !== '/login') { showLogin(); throw new Error(data.error || 'লগইন করুন'); }
+    if (r.status === 409 && data.needHotel) { location.hash = 'hotels'; throw new Error(data.error); }
     if (!r.ok) throw new Error(data.error || `ত্রুটি ${r.status}`);
     return data;
   }
@@ -99,8 +101,16 @@
   });
   $('#menu-btn').onclick = () => $('#nav').classList.toggle('open');
 
-  const can = (p) => me && (me.perms.includes('*') || me.perms.includes(p));
+  const isSuper = () => me && me.role === 'superadmin';
+  const can = (p) => {
+    if (!me) return false;
+    const perms = me.perms || [];
+    if (p === 'hotels' || p === 'apk') return perms.includes(p);
+    if (isSuper() && !hotel) return false; // super admin must enter a hotel first
+    return perms.includes('*') || perms.includes(p);
+  };
   const PAGES = [
+    { id: 'hotels', label: '🏨 সব হোটেল', perm: 'hotels', render: pageHotels },
     { id: 'dashboard', label: 'ড্যাশবোর্ড', perm: 'dashboard', render: pageDashboard },
     { id: 'checkin', label: 'চেক-ইন', perm: 'checkin', render: pageCheckin },
     { id: 'checkout', label: 'চেক-আউট', perm: 'checkin', render: pageCheckout },
@@ -125,23 +135,29 @@
     current = page.id;
     renderNav();
     $('#nav').classList.remove('open');
-    const el = $('#page');
-    try { await page.render(el); } catch (e) { el.innerHTML = `<div class="alert">${esc(e.message)}</div>`; }
+    // Draw into a fresh box and show it only if no newer page was requested meanwhile
+    // (a live update can start a slow render that would otherwise overwrite the page the user moved to).
+    const seq = ++goSeq;
+    const box = document.createElement('div');
+    try { await page.render(box); } catch (e) { box.innerHTML = `<div class="alert">${esc(e.message)}</div>`; }
+    if (seq === goSeq) $('#page').replaceChildren(box);
   }
+  let goSeq = 0;
   window.addEventListener('hashchange', () => go(location.hash.slice(1)));
 
   async function start() {
     const r = await api('/me');
     me = r.user; warnings = r.warnings || {}; standalone = !!r.standalone;
-    $('#who').textContent = `${me.displayName || me.username} · ${roleName(me.role)}`;
+    hotel = r.hotel || null;
+    $('#who').textContent = `${hotel ? hotel.name + ' · ' : ''}${me.displayName || me.username} · ${roleName(me.role)}`;
     $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
     if (standalone) startPolling(); else connectWs();
     refreshOrderCount();
-    go(location.hash.slice(1) || 'dashboard');
+    go(location.hash.slice(1) || (isSuper() && !hotel ? 'hotels' : 'dashboard'));
   }
-  const ROLES = { reception: 'রিসেপশন', kitchen: 'কিচেন / রুম সার্ভিস', manager: 'ম্যানেজার', technician: 'টেকনিশিয়ান' };
-  const roleName = (r) => ROLES[r] || r;
+  const ROLES = { manager: 'ম্যানেজার / মালিক', reception: 'রিসেপশন', kitchen: 'কিচেন / রুম সার্ভিস', technician: 'টেকনিশিয়ান' };
+  const roleName = (r) => (r === 'superadmin' ? 'সুপার অ্যাডমিন' : ROLES[r] || r);
 
   async function refreshOrderCount() {
     if (!can('orders.view')) return;
@@ -211,6 +227,73 @@
   const debounceDash = () => { clearTimeout(dashT); dashT = setTimeout(() => current === 'dashboard' && go('dashboard'), 800); };
 
   // ---------------------------------------------------------------- pages
+  async function pageHotels(el) {
+    const { hotels, current } = await api('/hotels');
+    const totals = hotels.reduce((t, h) => ({ tvs: t.tvs + h.tvs, on: t.on + h.tvsOnline, guests: t.guests + h.guests }), { tvs: 0, on: 0, guests: 0 });
+    el.innerHTML = `<h2>সব হোটেল</h2>
+      <div class="stats">
+        <div class="stat"><div class="v">${hotels.length}</div><div class="k">হোটেল</div></div>
+        <div class="stat"><div class="v">${totals.on}/${totals.tvs}</div><div class="k">টিভি অনলাইন</div></div>
+        <div class="stat"><div class="v">${totals.guests}</div><div class="k">রুমে অতিথি</div></div>
+      </div>
+      <div class="card table-wrap"><table>
+        <tr><th>হোটেল</th><th>টিভি কোড</th><th>ম্যানেজার</th><th class="num">রুম</th><th class="num">টিভি (অন/মোট)</th><th class="num">অতিথি</th><th>অবস্থা</th><th></th></tr>
+        ${hotels.map((h) => `<tr>
+          <td><b>${esc(h.name)}</b>${h.id === current ? ' <span class="pill p-info">এখন খোলা</span>' : ''}<div class="muted" style="font-size:12px">${esc(h.note || '')}</div></td>
+          <td><code style="font-size:16px;letter-spacing:.08em">${esc(h.code)}</code></td>
+          <td>${h.managers.map(esc).join(', ') || '<span class="muted">—</span>'}</td>
+          <td class="num">${h.rooms}</td><td class="num">${h.tvsOnline}/${h.tvs}</td><td class="num">${h.guests}</td>
+          <td>${h.active ? '<span class="pill p-ok">চালু</span>' : '<span class="pill p-bad">বন্ধ</span>'}</td>
+          <td style="white-space:nowrap"><button class="btn sm primary" data-enter="${h.id}">ঢুকুন</button>
+            <button class="btn sm" data-edit="${h.id}">বদলান</button></td></tr>`).join('')}
+      </table></div>
+      <form class="card" id="hf"><h3>নতুন হোটেল খুলুন</h3>
+        <div class="grid2">
+          <label>হোটেলের নাম<input name="name" required maxlength="80" placeholder="যেমন: হোটেল সী ভিউ, কক্সবাজার"></label>
+          <label>রুম নম্বর (রেঞ্জ, কমা দিয়ে)<input name="rooms" value="101-110, 201-210" placeholder="101-110, 201-210, 301"></label>
+          <label>মালিক/ম্যানেজারের ইউজারনেম<input name="managerUsername" required pattern="[a-zA-Z0-9_.\-]{3,30}" placeholder="যেমন: seaview"></label>
+          <label>পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)<input name="managerPassword" required minlength="6"></label>
+          <label>মালিকের নাম<input name="managerName" placeholder="ঐচ্ছিক"></label>
+          <label>নোট (ফোন, ঠিকানা, প্যাকেজ)<input name="note" maxlength="200"></label>
+        </div>
+        <div style="margin-top:12px"><button class="btn primary">হোটেল খুলুন</button></div>
+        <p class="muted">হোটেল খুললে নিজে থেকেই রুম, নমুনা মেনু আর একটা টিভি কোড তৈরি হয়। মালিককে ইউজারনেম, পাসওয়ার্ড আর অ্যাডমিন প্যানেলের ঠিকানা দিন; টিভি বসানোর সময় টিভি-অ্যাডমিনে টিভি কোড দিতে হবে।</p>
+      </form>
+      ${can('apk') ? '<p class="muted">সব হোটেলের জন্য একটাই APK — নতুন ভার্সন আপলোড করতে যেকোনো হোটেলে ঢুকে “টিভি নিয়ন্ত্রণ” পাতায় যান।</p>' : ''}`;
+    $('#hf', el).onsubmit = guard(async (e) => {
+      e.preventDefault();
+      const v = Object.fromEntries(new FormData(e.target).entries());
+      const r = await api('/hotels', { method: 'POST', body: v });
+      await dialog(`✔ ${r.hotel.name} খোলা হয়েছে`, `<p>মালিককে এগুলো দিন:</p>
+        <div class="card" style="margin:0"><div>অ্যাডমিন প্যানেল: <b>${esc(location.origin)}/admin/</b></div>
+        <div>ইউজারনেম: <b>${esc(v.managerUsername)}</b></div><div>পাসওয়ার্ড: <b>${esc(v.managerPassword)}</b></div>
+        <div>টিভি কোড: <b style="font-size:20px;letter-spacing:.1em">${esc(r.hotel.code)}</b></div></div>`, 'ঠিক আছে');
+      go('hotels');
+    });
+    $$('[data-enter]', el).forEach((b) => {
+      b.onclick = guard(async () => {
+        await api(`/hotels/${b.dataset.enter}/enter`, { method: 'POST' });
+        location.hash = 'dashboard';
+        location.reload();
+      });
+    });
+    $$('[data-edit]', el).forEach((b) => {
+      b.onclick = guard(async () => {
+        const h = hotels.find((x) => x.id === Number(b.dataset.edit));
+        const v = await dialog(`হোটেল: ${h.name}`, `
+          <label>নাম<input name="name" value="${esc(h.name)}" required></label>
+          <label>নোট<input name="note" value="${esc(h.note || '')}"></label>
+          <label><span><input type="checkbox" name="active" style="width:auto" ${h.active ? 'checked' : ''}> চালু (বন্ধ করলে মালিক লগইন করতে পারবেন না, টিভি সংযোগ পাবে না)</span></label>
+          <label><span><input type="checkbox" name="newCode" style="width:auto"> নতুন টিভি কোড বানান (পুরোনো কোডের টিভিগুলো আবার সেট করতে হবে)</span></label>
+          <p class="muted">মালিকের পাসওয়ার্ড বদলাতে: “ঢুকুন” → ইউজার ও লগ।</p>`);
+        if (!v) return;
+        await api(`/hotels/${h.id}`, { method: 'PUT', body: { name: v.name, note: v.note, active: !!v.active, newCode: !!v.newCode } });
+        toast('✔ সেভ হয়েছে');
+        go('hotels');
+      });
+    });
+  }
+
   async function pageDashboard(el) {
     const d = await api('/dashboard');
     const online = d.rooms.filter((r) => r.tv === 'online').length;
@@ -525,8 +608,11 @@
 
   const KEYN = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Enter: 'OK' };
   async function pageTv(el) {
-    const [{ settings: s, apk }, d] = await Promise.all([api('/tv/settings'), api('/dashboard')]);
+    const [{ settings: s, apk, hotelCode, canUploadApk }, d] = await Promise.all([api('/tv/settings'), api('/dashboard')]);
     el.innerHTML = `<h2>টিভি নিয়ন্ত্রণ</h2>
+      ${hotelCode ? `<div class="card"><h3>এই হোটেলের টিভি কোড</h3>
+        <div style="font-size:34px;font-weight:800;letter-spacing:.15em;color:var(--accent)">${esc(hotelCode)}</div>
+        <p class="muted">নতুন টিভি বসানোর সময় টিভি-অ্যাডমিন মেনুতে (রিমোটে ↑ ↑ ↓ ↓ ← → OK) সার্ভারের ঠিকানা <b>${esc(location.origin)}</b>, এই কোড আর রুম নম্বর দিন।</p></div>` : ''}
       ${s.pinIsDefault ? '<div class="warnbox">⚠ পিন এখনো ডেমোর ১২৩৪। নিচ থেকে বদলান।</div>' : ''}
       <div class="card"><h3>নির্দেশ পাঠান</h3>
         <div class="toolbar"><button class="btn sm" id="selall">সব বাছুন</button><button class="btn sm" id="selnone">কোনোটাই না</button>
@@ -546,12 +632,13 @@
         <label>চেক-আউটে যে অ্যাপের ডেটা মোছা হবে (কমা দিয়ে)<input name="clearPackages" value="${esc(s.clearPackages.join(', '))}"></label>
         <label><span><input type="checkbox" name="kiosk" style="width:auto" ${s.kiosk ? 'checked' : ''}> কড়া লক (Kiosk / Lock Task) — শুধু Device Owner টিভিতে কাজ করে</span></label>
       </div><div style="margin-top:12px"><button class="btn primary">সেভ</button></div></form>
-      <form class="card" id="apkf"><h3>অ্যাপ আপডেট (APK)</h3>
+      ${canUploadApk === false ? `<div class="card"><h3>অ্যাপ আপডেট</h3><p class="muted">সার্ভারের বর্তমান APK: ${apk ? `ভার্সন ${esc(apk.versionName)} (code ${apk.versionCode})` : 'নেই'}। নতুন ভার্সন আপলোড করেন সেবাদাতা; এখান থেকে “নতুন ভার্সন পাঠান” দিয়ে টিভিতে বসাতে পারবেন।</p></div>` : `
+      <form class="card" id="apkf"><h3>অ্যাপ আপডেট (APK) — সব হোটেলের জন্য</h3>
         <p class="muted">বর্তমান সার্ভার APK: ${apk ? `ভার্সন ${esc(apk.versionName)} (code ${apk.versionCode}) · ${(apk.size / 1048576).toFixed(1)} MB · ${dt(apk.uploadedAt)}` : 'এখনো আপলোড হয়নি'}</p>
         <div class="row"><label>APK ফাইল<input type="file" name="file" accept=".apk" required></label>
         <label>versionCode<input name="versionCode" type="number" min="1" required value="${apk ? apk.versionCode + 1 : 2}"></label>
         <label>versionName<input name="versionName" placeholder="1.0.1"></label><button class="btn primary">আপলোড</button></div>
-        <p class="muted">আপলোডের পর “নতুন ভার্সন পাঠান” চাপুন। Device Owner টিভিতে নিজে থেকে ইনস্টল হবে, অন্য টিভিতে পর্দায় “Install” চাপতে হবে।</p></form>
+        <p class="muted">আপলোডের পর “নতুন ভার্সন পাঠান” চাপুন। Device Owner টিভিতে নিজে থেকে ইনস্টল হবে, অন্য টিভিতে পর্দায় “Install” চাপতে হবে।</p></form>`}
       <div class="card table-wrap"><h3>টিভির তালিকা</h3><table><tr><th>রুম</th><th>আইপি</th><th>মডেল</th><th>ভার্সন</th><th>শেষ সংকেত</th></tr>
         ${d.rooms.flatMap((r) => r.devices.map((x) => `<tr><td>${esc(r.number)}</td><td>${esc(x.ip)}</td><td>${esc(x.model || '')}</td><td>${esc(x.version || '')}</td><td>${ago(x.lastSeen)}</td></tr>`)).join('') || '<tr><td colspan="5" class="muted">এখনো কোনো টিভি যুক্ত হয়নি</td></tr>'}</table></div>`;
     const boxes = () => $$('.checks input', el);
@@ -580,7 +667,7 @@
       toast('✔ সব টিভিতে পাঠানো হয়েছে');
       go('tv');
     });
-    $('#apkf', el).onsubmit = guard(async (e) => {
+    if ($('#apkf', el)) $('#apkf', el).onsubmit = guard(async (e) => {
       e.preventDefault();
       const f = new FormData(e.target);
       const file = f.get('file');

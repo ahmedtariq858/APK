@@ -33,6 +33,7 @@
     return {
       serverUrl: location.protocol.startsWith('http') ? location.origin : '',
       room: q.get('room') || store.get('browserRoom', '101'),
+      hotelCode: q.get('hotel') || store.get('browserHotel', ''),
       deviceId: id, versionName: 'web', versionCode: 0, model: navigator.userAgent.slice(0, 60),
       isDeviceOwner: false, ip: '',
       standalone: q.get('standalone') === '1' // browser test of a TV that is its own server
@@ -355,7 +356,7 @@
     if (!lines.length || !state || !state.guest) return;
     const order = {
       clientId: cfg.deviceId + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-      room: cfg.room, items: lines.map((l) => ({ id: l.item.id, qty: l.qty })), createdAt: Date.now()
+      hotel: cfg.hotelCode || '', room: cfg.room, items: lines.map((l) => ({ id: l.item.id, qty: l.qty })), createdAt: Date.now()
     };
     outbox.push(order);
     store.set('outbox', outbox);
@@ -448,7 +449,7 @@
     if (!apiBase()) return;
     fetch(apiBase() + '/api/tv/alert', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ room: cfg.room, kind, message })
+      body: JSON.stringify({ hotel: cfg.hotelCode || '', room: cfg.room, kind, message })
     }).catch(() => {});
   }
 
@@ -461,6 +462,7 @@
     const lastSync = store.get('lastSync', 0);
     viewEl.innerHTML = `${head('টিভি-অ্যাডমিন · TV admin')}
       <div class="form">
+        <div class="field"><label>হোটেল কোড · Hotel code <span style="color:var(--gold)">(অ্যাডমিন প্যানেল → টিভি নিয়ন্ত্রণ)</span></label><input class="f" data-key="hcode" id="in-hotel" value="${esc(cfg.hotelCode || '')}" placeholder="যেমন K7Q2MX" style="text-transform:uppercase"></div>
         <div class="field"><label>রুম নম্বর · Room</label><input class="f" data-key="room" id="in-room" value="${esc(cfg.room || '')}" inputmode="numeric"></div>
         <div class="field"><label>সার্ভারের ঠিকানা · Server <span style="color:var(--gold)">(খালি = এই টিভিতেই সার্ভার)</span></label><input class="f" data-key="srv" id="in-srv" value="${esc(cfg.standalone ? '' : (cfg.serverUrl || ''))}" placeholder="খালি রাখুন · or http://192.168.1.10:8080"></div>
       </div>
@@ -510,16 +512,19 @@
 
   async function saveTvConfig() {
     const room = $('#in-room').value.trim();
+    const hotelCode = $('#in-hotel').value.trim().toUpperCase();
     let srv = $('#in-srv').value.trim().replace(/\/+$/, '');
     if (srv && !/^https?:\/\//.test(srv)) srv = 'http://' + srv;
     // A bare local IP ("192.168.1.10") means the server's default port; names and https URLs are kept as typed.
     if (/^http:\/\/\d+\.\d+\.\d+\.\d+$/.test(srv)) srv += ':8080';
     if (A) {
       // An empty server field = standalone: this TV runs the server itself.
-      A.setConfig(JSON.stringify({ room, serverUrl: srv }));
+      A.setConfig(JSON.stringify({ room, serverUrl: srv, hotelCode }));
       cfg = loadConfig();
     } else {
       cfg.room = room;
+      cfg.hotelCode = hotelCode;
+      store.set('browserHotel', hotelCode);
       if (srv) cfg.serverUrl = srv;
       store.set('browserRoom', room);
     }
@@ -527,9 +532,10 @@
     if (cfg.standalone) await new Promise((r) => setTimeout(r, 400)); // give the built-in server a moment
     let msg;
     try {
-      const r = await fetch(target + '/api/tv/state?room=' + encodeURIComponent(room) + '&device=' + encodeURIComponent(cfg.deviceId), { cache: 'no-store' });
+      const r = await fetch(target + '/api/tv/state?hotel=' + encodeURIComponent(hotelCode) + '&room=' + encodeURIComponent(room) + '&device=' + encodeURIComponent(cfg.deviceId), { cache: 'no-store' });
       const s = await r.json();
-      msg = r.ok ? (s.known ? `✔ সংযোগ ঠিক আছে — রুম ${room} সার্ভারে আছে` : `⚠ সংযোগ ঠিক আছে, কিন্তু রুম ${room} সার্ভারের তালিকায় নেই`) : '✖ সার্ভার উত্তর দিয়েছে: ' + (s.error || r.status);
+      const hn = s.hotelName ? ` (${s.hotelName})` : '';
+      msg = r.ok ? (s.known ? `✔ সংযোগ ঠিক আছে — ${hn ? 'হোটেল' + hn + ', ' : ''}রুম ${room}` : `⚠ সংযোগ ঠিক আছে${hn}, কিন্তু রুম ${room} এই হোটেলের তালিকায় নেই`) : '✖ সার্ভার উত্তর দিয়েছে: ' + (s.error || r.status);
       if (r.ok && cfg.standalone) msg += ' (এই টিভিই সার্ভার)';
     } catch (e) { msg = '✖ সার্ভারে পৌঁছানো যায়নি: ' + target + ' — সার্ভারের ঘর খালি রাখলে এই টিভিই সার্ভার হবে'; }
     reconnect();
@@ -664,7 +670,7 @@
   let ws = null, wsOk = false, lastPollOk = false, reconnectTimer = null;
 
   function wsUrl() {
-    const q = new URLSearchParams({ room: cfg.room, device: cfg.deviceId, version: String(cfg.versionName || ''), model: String(cfg.model || '') });
+    const q = new URLSearchParams({ hotel: cfg.hotelCode || '', room: cfg.room, device: cfg.deviceId, version: String(cfg.versionName || ''), model: String(cfg.model || '') });
     return apiBase().replace(/^http/, 'ws') + '/ws/tv?' + q;
   }
   function connect() {
@@ -694,7 +700,7 @@
   async function poll() {
     if (!apiBase() || !cfg.room) return;
     try {
-      const q = new URLSearchParams({ room: cfg.room, device: cfg.deviceId, version: String(cfg.versionName || ''), model: String(cfg.model || '') });
+      const q = new URLSearchParams({ hotel: cfg.hotelCode || '', room: cfg.room, device: cfg.deviceId, version: String(cfg.versionName || ''), model: String(cfg.model || '') });
       const r = await fetch(apiBase() + '/api/tv/state?' + q, { cache: 'no-store' });
       if (!r.ok) throw new Error(r.status);
       const s = await r.json();
@@ -764,7 +770,7 @@
       } else { ok = false; message = 'unknown'; }
     } catch (e) { ok = false; message = String(e && e.message || e); }
     if (ws && wsOk) ws.send(JSON.stringify({ type: 'commandResult', id: c.id, command: c.command, ok, message }));
-    else if (apiBase()) fetch(apiBase() + '/api/tv/result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ room: cfg.room, id: c.id, command: c.command, ok, message }) }).catch(() => {});
+    else if (apiBase()) fetch(apiBase() + '/api/tv/result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hotel: cfg.hotelCode || '', room: cfg.room, id: c.id, command: c.command, ok, message }) }).catch(() => {});
   }
 
   // ---------------------------------------------------------------- sha256 (WebView on http has no crypto.subtle)

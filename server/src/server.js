@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { openDb, getKv, setKv } from './db.js';
+import { openDb, getKv, setKv, createHotel, newHotelCode, parseRooms } from './db.js';
 import {
   sha256, hashPassword, verifyPassword, randomToken,
   parseCidrs, ipAllowed, normalizeIp, todayKey
@@ -16,17 +16,25 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const SESSION_TTL = 12 * 60 * 60 * 1000;
 const OFFLINE_AFTER = 150 * 1000; // TV pings every 60 s; 2.5 min without one = offline
 
-/** Which pages/actions each role may use. */
+/**
+ * Roles. 'superadmin' is the platform owner: manages hotels and can enter any hotel.
+ * Everyone else belongs to exactly one hotel and only ever sees that hotel.
+ * 'hotels' and 'apk' are platform-level permissions only the super admin has.
+ */
 const ROLE_PERMS = {
+  superadmin: ['*', 'hotels', 'apk'],
+  manager: ['*'],
   reception: ['dashboard', 'checkin', 'notices', 'orders.view'],
   kitchen: ['dashboard', 'orders.view', 'orders.manage', 'menu'],
-  manager: ['*'],
   technician: ['dashboard', 'tv']
 };
+const PLATFORM_PERMS = ['hotels', 'apk'];
 const can = (user, perm) => {
   const p = ROLE_PERMS[user?.role] || [];
+  if (PLATFORM_PERMS.includes(perm)) return p.includes(perm);
   return p.includes('*') || p.includes(perm);
 };
+const HOTEL_ROLES = ['manager', 'reception', 'kitchen', 'technician'];
 
 export function createServer(opts = {}) {
   const dataDir = opts.dataDir || process.env.DATA_DIR || path.join(__dirname, '..', 'data');
@@ -43,17 +51,19 @@ export function createServer(opts = {}) {
   app.disable('x-powered-by');
   app.set('trust proxy', false);
 
-  // ---------- helpers ----------
-  const audit = (user, action, detail) =>
-    db.prepare('INSERT INTO audit_log (at, username, action, detail) VALUES (?,?,?,?)')
-      .run(Date.now(), user?.username ?? null, action, detail == null ? null : JSON.stringify(detail));
+  // ---------- helpers (every one takes the hotel id `hid`) ----------
+  const audit = (hid, user, action, detail) =>
+    db.prepare('INSERT INTO audit_log (hotel_id, at, username, action, detail) VALUES (?,?,?,?,?)')
+      .run(hid ?? null, Date.now(), user?.username ?? null, action, detail == null ? null : JSON.stringify(detail));
 
-  const getRoom = (n) => db.prepare('SELECT * FROM rooms WHERE number = ?').get(String(n));
+  const getHotel = (hid) => db.prepare('SELECT * FROM hotels WHERE id = ?').get(hid);
+  const getRoom = (hid, n) => db.prepare('SELECT * FROM rooms WHERE hotel_id = ? AND number = ?').get(hid, String(n));
+  const content = (hid) => getKv(db, `content:${hid}`);
+  const tvSettings = (hid) => getKv(db, `tv:${hid}`);
 
-  const activeNotices = (room, now = Date.now()) => {
-    const rows = db.prepare(`SELECT * FROM notices
-      WHERE (starts_at IS NULL OR starts_at <= ?) AND (ends_at IS NULL OR ends_at > ?)
-      ORDER BY id`).all(now, now);
+  const activeNotices = (hid, room, now = Date.now()) => {
+    const rows = db.prepare(`SELECT * FROM notices WHERE hotel_id = ?
+      AND (starts_at IS NULL OR starts_at <= ?) AND (ends_at IS NULL OR ends_at > ?) ORDER BY id`).all(hid, now, now);
     if (!room) return rows;
     return rows.filter((n) => n.target_type === 'all'
       || (n.target_type === 'floor' && n.target === room.floor)
@@ -62,14 +72,14 @@ export function createServer(opts = {}) {
 
   const mapOrder = (o) => ({ ...o, items: JSON.parse(o.items), billed: !!o.billed });
 
-  function roomOrders(room) {
+  function roomOrders(hid, room) {
     if (!room?.checkin_at) return [];
-    return db.prepare('SELECT * FROM orders WHERE room = ? AND created_at >= ? ORDER BY id DESC')
-      .all(room.number, room.checkin_at).map(mapOrder);
+    return db.prepare('SELECT * FROM orders WHERE hotel_id = ? AND room = ? AND created_at >= ? ORDER BY id DESC')
+      .all(hid, room.number, room.checkin_at).map(mapOrder);
   }
 
-  function tvPublicSettings() {
-    const tv = getKv(db, 'tv');
+  function tvPublicSettings(hid) {
+    const tv = tvSettings(hid);
     const apk = getKv(db, 'apk');
     return {
       pinSalt: tv.pinSalt, pinHash: tv.pinHash, combo: tv.combo, maxVolume: tv.maxVolume,
@@ -78,10 +88,9 @@ export function createServer(opts = {}) {
     };
   }
 
-  function roomState(number) {
-    const room = getRoom(number);
-    const content = getKv(db, 'content');
-    const menu = db.prepare('SELECT * FROM menu_items ORDER BY sort, id').all()
+  function roomState(hid, number) {
+    const room = getRoom(hid, number);
+    const menu = db.prepare('SELECT * FROM menu_items WHERE hotel_id = ? ORDER BY sort, id').all(hid)
       .map((m) => ({ ...m, available: !!m.available }));
     return {
       room: number,
@@ -90,65 +99,69 @@ export function createServer(opts = {}) {
       guest: room?.guest_name
         ? { name: room.guest_name, language: room.language, checkinAt: room.checkin_at, checkoutAt: room.checkout_at }
         : null,
-      content,
-      notices: room ? activeNotices(room).map(({ id, style, text_bn, text_en, starts_at, ends_at }) =>
+      content: content(hid),
+      notices: room ? activeNotices(hid, room).map(({ id, style, text_bn, text_en, starts_at, ends_at }) =>
         ({ id, style, text: { bn: text_bn, en: text_en }, startsAt: starts_at, endsAt: ends_at })) : [],
       menu,
-      orders: roomOrders(room),
-      tv: tvPublicSettings(),
+      orders: roomOrders(hid, room),
+      tv: tvPublicSettings(hid),
       serverTime: Date.now()
     };
   }
 
   // ---------- realtime hubs ----------
-  const tvSockets = new Map(); // room -> Set<ws>
-  const adminSockets = new Set();
-  const pendingCommands = new Map(); // room -> [{id, command, args}] for TVs that only poll
+  const key = (hid, room) => `${hid}:${room}`;
+  const tvSockets = new Map(); // "hid:room" -> Set<ws>
+  const adminSockets = new Set(); // ws with ws.hid
+  const pendingCommands = new Map(); // "hid:room" -> [{id, command, args}] for TVs that only poll
 
   const send = (ws, msg) => { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); };
 
-  function pushRoom(number) {
-    const set = tvSockets.get(String(number));
+  function pushRoom(hid, number) {
+    const set = tvSockets.get(key(hid, number));
     if (!set || set.size === 0) return;
-    const state = roomState(String(number));
+    const state = roomState(hid, String(number));
     for (const ws of set) send(ws, { type: 'state', state });
   }
-  function pushAllRooms() {
-    for (const room of tvSockets.keys()) pushRoom(room);
+  function pushAllRooms(hid) {
+    for (const k of tvSockets.keys()) {
+      const [h, room] = [Number(k.slice(0, k.indexOf(':'))), k.slice(k.indexOf(':') + 1)];
+      if (h === hid) pushRoom(h, room);
+    }
   }
-  function notifyAdmins(msg) {
-    for (const ws of adminSockets) send(ws, msg);
+  function notifyAdmins(hid, msg) {
+    for (const ws of adminSockets) if (ws.hid === hid || (ws.isSuper && msg.type === 'hotels.changed')) send(ws, msg);
   }
   let cmdSeq = 0;
-  function sendCommand(rooms, command, args = {}) {
+  function sendCommand(hid, rooms, command, args = {}) {
     const cmd = { id: `${Date.now()}-${++cmdSeq}`, command, args };
     let delivered = 0;
     for (const r of rooms) {
-      const set = tvSockets.get(String(r));
+      const set = tvSockets.get(key(hid, r));
       if (set && set.size) {
         for (const ws of set) send(ws, { type: 'command', ...cmd });
         delivered++;
       } else {
-        const q = pendingCommands.get(String(r)) || [];
+        const q = pendingCommands.get(key(hid, r)) || [];
         q.push(cmd);
-        pendingCommands.set(String(r), q.slice(-10));
+        pendingCommands.set(key(hid, r), q.slice(-10));
       }
     }
     return { delivered, queued: rooms.length - delivered };
   }
 
-  function touchDevice({ id, room, ip, version, model }) {
+  function touchDevice(hid, { id, room, ip, version, model }) {
     if (!id) return;
-    db.prepare(`INSERT INTO devices (id, room, ip, version, model, last_seen) VALUES (?,?,?,?,?,?)
-      ON CONFLICT(id) DO UPDATE SET room=excluded.room, ip=excluded.ip,
+    db.prepare(`INSERT INTO devices (id, hotel_id, room, ip, version, model, last_seen) VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET hotel_id=excluded.hotel_id, room=excluded.room, ip=excluded.ip,
         version=COALESCE(excluded.version, devices.version), model=COALESCE(excluded.model, devices.model),
         last_seen=excluded.last_seen`)
-      .run(String(id), room == null ? null : String(room), normalizeIp(ip), version ?? null, model ?? null, Date.now());
+      .run(String(id), hid, room == null ? null : String(room), normalizeIp(ip), version ?? null, model ?? null, Date.now());
   }
 
-  function addAlert(room, kind, message) {
-    db.prepare('INSERT INTO alerts (at, room, kind, message) VALUES (?,?,?,?)').run(Date.now(), room ?? null, kind, message);
-    notifyAdmins({ type: 'alert', room, kind, message });
+  function addAlert(hid, room, kind, message) {
+    db.prepare('INSERT INTO alerts (hotel_id, at, room, kind, message) VALUES (?,?,?,?,?)').run(hid, Date.now(), room ?? null, kind, message);
+    notifyAdmins(hid, { type: 'alert', room, kind, message });
   }
 
   // ---------- middleware ----------
@@ -158,12 +171,19 @@ export function createServer(opts = {}) {
     const m = /(?:^|;\s*)sid=([a-f0-9]{64})/.exec(req.headers.cookie || '');
     return m ? m[1] : null;
   };
+  /** The logged-in user plus `hid`: their hotel, or for the super admin the hotel they entered (may be null). */
   function sessionUser(token) {
     if (!token) return null;
-    const row = db.prepare(`SELECT u.id, u.username, u.display_name, u.role, s.expires_at
+    const row = db.prepare(`SELECT u.id, u.username, u.display_name, u.role, u.hotel_id AS user_hotel,
+        s.hotel_id AS session_hotel, s.expires_at
       FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND u.active = 1`).get(token);
     if (!row || row.expires_at < Date.now()) return null;
-    return row;
+    const hid = row.role === 'superadmin' ? row.session_hotel : row.user_hotel;
+    if (row.role !== 'superadmin') {
+      const h = getHotel(hid);
+      if (!h || !h.active) return null; // hotel switched off by the platform owner
+    }
+    return { ...row, token, hid: hid ?? null };
   }
 
   const staffOnly = (req, res, next) => {
@@ -177,11 +197,14 @@ export function createServer(opts = {}) {
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
   };
-  const auth = (perm) => (req, res, next) => {
+  /** auth(perm) for hotel pages (needs a hotel); auth(perm, { platform: true }) for super-admin pages. */
+  const auth = (perm, { platform = false } = {}) => (req, res, next) => {
     const user = sessionUser(cookieToken(req));
     if (!user) return res.status(401).json({ error: 'লগইন করুন' });
     if (perm && !can(user, perm)) return res.status(403).json({ error: 'এই কাজের অনুমতি নেই' });
+    if (!platform && !user.hid) return res.status(409).json({ error: 'আগে একটা হোটেল বাছুন', needHotel: true });
     req.user = user;
+    req.hid = user.hid;
     next();
   };
   const wrap = (fn) => (req, res) => {
@@ -191,6 +214,19 @@ export function createServer(opts = {}) {
     }
   };
   const bad = (msg) => Object.assign(new Error(msg), { status: 400, expose: true });
+
+  /** Which hotel a TV belongs to: its hotel code, or the only hotel if there is just one. */
+  function tvHotel(code) {
+    if (code) {
+      const h = db.prepare('SELECT * FROM hotels WHERE code = ?').get(String(code).trim().toUpperCase());
+      if (!h) throw Object.assign(new Error('হোটেল কোড ঠিক নয়'), { status: 404, expose: true });
+      if (!h.active) throw Object.assign(new Error('এই হোটেলের সেবা বন্ধ আছে'), { status: 403, expose: true });
+      return h.id;
+    }
+    const all = db.prepare('SELECT id, active FROM hotels').all();
+    if (all.length === 1 && all[0].active) return all[0].id;
+    throw bad('হোটেল কোড দিন (টিভি-অ্যাডমিন মেনুতে)');
+  }
 
   // ---------- static ----------
   const noCache = { setHeaders: (res) => res.set('Cache-Control', 'no-cache') };
@@ -206,23 +242,25 @@ export function createServer(opts = {}) {
   tv.use(tvOnly);
 
   tv.get('/state', wrap((req, res) => {
+    const hid = tvHotel(req.query.hotel);
     const room = String(req.query.room || '');
     if (!room) throw bad('room দরকার');
-    touchDevice({ id: req.query.device, room, ip: req.socket.remoteAddress, version: req.query.version, model: req.query.model });
-    const commands = pendingCommands.get(room) || [];
-    pendingCommands.delete(room);
-    res.json({ ...roomState(room), commands });
+    touchDevice(hid, { id: req.query.device, room, ip: req.socket.remoteAddress, version: req.query.version, model: req.query.model });
+    const commands = pendingCommands.get(key(hid, room)) || [];
+    pendingCommands.delete(key(hid, room));
+    res.json({ ...roomState(hid, room), hotelName: getHotel(hid).name, commands });
   }));
 
   tv.post('/heartbeat', wrap((req, res) => {
-    const { device, room, version, model } = req.body || {};
-    touchDevice({ id: device, room, ip: req.socket.remoteAddress, version, model });
+    const { device, room, version, model, hotel } = req.body || {};
+    touchDevice(tvHotel(hotel), { id: device, room, ip: req.socket.remoteAddress, version, model });
     res.json({ ok: true });
   }));
 
   tv.post('/orders', wrap((req, res) => {
-    const { room, items, note = '', clientId } = req.body || {};
-    const r = getRoom(room);
+    const { room, items, note = '', clientId, hotel } = req.body || {};
+    const hid = tvHotel(hotel);
+    const r = getRoom(hid, room);
     if (!r) throw bad('অজানা রুম');
     if (clientId) {
       const dup = db.prepare('SELECT * FROM orders WHERE client_id = ?').get(String(clientId));
@@ -232,7 +270,7 @@ export function createServer(opts = {}) {
     const lines = [];
     let total = 0;
     for (const it of items) {
-      const m = db.prepare('SELECT * FROM menu_items WHERE id = ?').get(Number(it.id));
+      const m = db.prepare('SELECT * FROM menu_items WHERE id = ? AND hotel_id = ?').get(Number(it.id), hid);
       const qty = Math.max(1, Math.min(20, Math.floor(Number(it.qty) || 0)));
       if (!m) throw bad('মেনুতে নেই এমন খাবার');
       if (!m.available) throw bad(`${m.name_bn} এখন পাওয়া যাচ্ছে না`);
@@ -240,27 +278,29 @@ export function createServer(opts = {}) {
       total += m.price * qty;
     }
     const now = Date.now();
-    const info = db.prepare(`INSERT INTO orders (client_id, room, guest_name, items, note, total, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?)`).run(clientId ? String(clientId) : null, r.number, r.guest_name, JSON.stringify(lines), String(note).slice(0, 300), total, now, now);
+    const info = db.prepare(`INSERT INTO orders (hotel_id, client_id, room, guest_name, items, note, total, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).run(hid, clientId ? String(clientId) : null, r.number, r.guest_name, JSON.stringify(lines), String(note).slice(0, 300), total, now, now);
     const order = mapOrder(db.prepare('SELECT * FROM orders WHERE id = ?').get(info.lastInsertRowid));
-    notifyAdmins({ type: 'order.new', order });
-    pushRoom(r.number);
+    notifyAdmins(hid, { type: 'order.new', order });
+    pushRoom(hid, r.number);
     res.json({ order });
   }));
 
   tv.post('/alert', wrap((req, res) => {
-    const { room, kind, message } = req.body || {};
+    const { room, kind, message, hotel } = req.body || {};
+    const hid = tvHotel(hotel);
     const allowed = { pin_lockout: 'টিভি-অ্যাডমিন পিন ৫ বার ভুল দেওয়া হয়েছে', clear_failed: 'অতিথির লগইন মোছা যায়নি', exit: 'টিভিতে লঞ্চার থেকে বের হওয়া হয়েছে' };
     if (!allowed[kind]) throw bad('unknown alert');
-    addAlert(room ? String(room) : null, kind, message ? String(message).slice(0, 200) : allowed[kind]);
+    addAlert(hid, room ? String(room) : null, kind, message ? String(message).slice(0, 200) : allowed[kind]);
     res.json({ ok: true });
   }));
 
   // Command results from TVs that poll instead of using the WebSocket.
   tv.post('/result', wrap((req, res) => {
-    const { room, id, command, ok, message } = req.body || {};
-    notifyAdmins({ type: 'command.result', room, id, ok: !!ok, message: String(message || '').slice(0, 200) });
-    if (command === 'clearGuestData' && !ok) addAlert(room ? String(room) : null, 'clear_failed', 'অতিথির লগইন মোছা যায়নি (Device Owner চালু নেই?)');
+    const { room, id, command, ok, message, hotel } = req.body || {};
+    const hid = tvHotel(hotel);
+    notifyAdmins(hid, { type: 'command.result', room, id, ok: !!ok, message: String(message || '').slice(0, 200) });
+    if (command === 'clearGuestData' && !ok) addAlert(hid, room ? String(room) : null, 'clear_failed', 'অতিথির লগইন মোছা যায়নি (Device Owner চালু নেই?)');
     res.json({ ok: true });
   }));
 
@@ -270,18 +310,34 @@ export function createServer(opts = {}) {
   const api = express.Router();
   api.use(staffOnly);
 
+  const publicUser = (u) => ({
+    id: u.id, username: u.username, displayName: u.display_name, role: u.role,
+    perms: ROLE_PERMS[u.role]
+  });
+  const publicHotel = (h) => (h ? { id: h.id, name: h.name, code: h.code, active: !!h.active } : null);
+
   api.post('/login', wrap((req, res) => {
     const { username, password } = req.body || {};
     const u = db.prepare('SELECT * FROM users WHERE username = ? AND active = 1').get(String(username || ''));
     if (!u || !verifyPassword(password || '', u.pass_hash)) {
-      audit({ username: String(username || '') }, 'login.failed');
+      audit(u?.hotel_id, { username: String(username || '') }, 'login.failed');
       return res.status(401).json({ error: 'ইউজারনেম বা পাসওয়ার্ড ভুল' });
+    }
+    if (u.role !== 'superadmin') {
+      const h = getHotel(u.hotel_id);
+      if (!h || !h.active) return res.status(403).json({ error: 'আপনার হোটেলের অ্যাকাউন্ট এখন বন্ধ। সেবাদাতার সাথে যোগাযোগ করুন।' });
     }
     const token = randomToken();
     db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
-    db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)').run(token, u.id, Date.now() + SESSION_TTL);
+    // The super admin starts in the only hotel if there is just one, otherwise on the hotel list.
+    let startHotel = null;
+    if (u.role === 'superadmin') {
+      const all = db.prepare('SELECT id FROM hotels').all();
+      if (all.length === 1) startHotel = all[0].id;
+    }
+    db.prepare('INSERT INTO sessions (token, user_id, hotel_id, expires_at) VALUES (?,?,?,?)').run(token, u.id, startHotel, Date.now() + SESSION_TTL);
     res.set('Set-Cookie', `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL / 1000}`);
-    audit(u, 'login');
+    audit(u.hotel_id, u, 'login');
     res.json({ user: publicUser(u) });
   }));
 
@@ -292,32 +348,96 @@ export function createServer(opts = {}) {
     res.json({ ok: true });
   }));
 
-  const publicUser = (u) => ({
-    id: u.id, username: u.username, displayName: u.display_name, role: u.role,
-    perms: ROLE_PERMS[u.role]
-  });
-
-  api.get('/me', auth(), wrap((req, res) => {
-    const tvs = getKv(db, 'tv');
-    res.json({ user: publicUser(req.user), warnings: { defaultPin: !!tvs.pinIsDefault } });
+  api.get('/me', auth(null, { platform: true }), wrap((req, res) => {
+    const hotel = req.hid ? getHotel(req.hid) : null;
+    const tvs = req.hid ? tvSettings(req.hid) : null;
+    res.json({ user: publicUser(req.user), hotel: publicHotel(hotel), warnings: { defaultPin: !!tvs?.pinIsDefault } });
   }));
 
-  api.post('/me/password', auth(), wrap((req, res) => {
+  api.post('/me/password', auth(null, { platform: true }), wrap((req, res) => {
     const { current, next } = req.body || {};
     const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!verifyPassword(current || '', u.pass_hash)) throw bad('বর্তমান পাসওয়ার্ড ভুল');
     if (!next || String(next).length < 6) throw bad('নতুন পাসওয়ার্ড কমপক্ষে ৬ অক্ষর');
     db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hashPassword(next), u.id);
-    audit(req.user, 'password.change');
+    audit(req.hid, req.user, 'password.change');
     res.json({ ok: true });
   }));
 
-  // Dashboard: one row per room
-  api.get('/dashboard', auth('dashboard'), wrap((req, res) => {
+  // ----- platform: hotels (super admin only) -----
+  api.get('/hotels', auth('hotels', { platform: true }), wrap((req, res) => {
     const now = Date.now();
-    const rooms = db.prepare('SELECT * FROM rooms ORDER BY floor, number').all();
-    const devices = db.prepare('SELECT * FROM devices').all();
-    const newOrders = db.prepare("SELECT room, COUNT(*) AS n FROM orders WHERE status IN ('new','preparing') GROUP BY room").all();
+    const hotels = db.prepare('SELECT * FROM hotels ORDER BY id').all().map((h) => {
+      const rooms = db.prepare('SELECT COUNT(*) AS n, SUM(guest_name IS NOT NULL) AS g FROM rooms WHERE hotel_id = ?').get(h.id);
+      const dev = db.prepare('SELECT COUNT(*) AS n, SUM(last_seen > ?) AS on_ FROM devices WHERE hotel_id = ?').get(now - OFFLINE_AFTER, h.id);
+      const orders = db.prepare("SELECT COUNT(*) AS n FROM orders WHERE hotel_id = ? AND status IN ('new','preparing')").get(h.id).n;
+      const users = db.prepare('SELECT COUNT(*) AS n FROM users WHERE hotel_id = ?').get(h.id).n;
+      const managers = db.prepare("SELECT username FROM users WHERE hotel_id = ? AND role = 'manager' ORDER BY id").all(h.id).map((u) => u.username);
+      return { ...publicHotel(h), note: h.note, createdAt: h.created_at, rooms: rooms.n, guests: rooms.g || 0,
+        tvs: dev.n, tvsOnline: dev.on_ || 0, activeOrders: orders, users, managers };
+    });
+    res.json({ hotels, current: req.hid });
+  }));
+
+  api.post('/hotels', auth('hotels', { platform: true }), wrap((req, res) => {
+    const { name, rooms = '101-106', note = '', managerUsername, managerPassword, managerName = '' } = req.body || {};
+    if (!String(name || '').trim()) throw bad('হোটেলের নাম দিন');
+    if (managerUsername != null && managerUsername !== '') {
+      if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(String(managerUsername))) throw bad('ম্যানেজারের ইউজারনেম ৩–৩০ অক্ষর (a-z, 0-9)');
+      if (!managerPassword || String(managerPassword).length < 6) throw bad('ম্যানেজারের পাসওয়ার্ড কমপক্ষে ৬ অক্ষর');
+      if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(managerUsername)) throw bad('এই ইউজারনেম আগেই আছে');
+    }
+    parseRooms(rooms); // validate before creating anything
+    db.exec('BEGIN');
+    let hotel;
+    try {
+      hotel = createHotel(db, { name: String(name).trim().slice(0, 80), rooms, note: String(note).slice(0, 200) });
+      if (managerUsername) {
+        db.prepare('INSERT INTO users (hotel_id, username, display_name, pass_hash, role, created_at) VALUES (?,?,?,?,?,?)')
+          .run(hotel.id, managerUsername, managerName || 'Manager', hashPassword(managerPassword), 'manager', Date.now());
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    audit(hotel.id, req.user, 'hotel.create', { name: hotel.name, managerUsername });
+    res.json({ hotel: publicHotel(hotel) });
+  }));
+
+  api.put('/hotels/:id', auth('hotels', { platform: true }), wrap((req, res) => {
+    const h = getHotel(Number(req.params.id));
+    if (!h) return res.status(404).json({ error: 'হোটেল নেই' });
+    const { name, note, active, newCode } = req.body || {};
+    if (name != null && !String(name).trim()) throw bad('হোটেলের নাম দিন');
+    const code = newCode ? newHotelCode(db) : h.code;
+    db.prepare('UPDATE hotels SET name = ?, note = ?, active = ?, code = ? WHERE id = ?')
+      .run(name != null ? String(name).trim().slice(0, 80) : h.name, note != null ? String(note).slice(0, 200) : h.note,
+        active != null ? (active ? 1 : 0) : h.active, code, h.id);
+    if (active === false) {
+      db.prepare('DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE hotel_id = ?)').run(h.id);
+      for (const [k, set] of tvSockets) if (k.startsWith(`${h.id}:`)) for (const ws of set) ws.close();
+    }
+    audit(h.id, req.user, 'hotel.update', { name, active, newCode: !!newCode });
+    res.json({ hotel: publicHotel(getHotel(h.id)) });
+  }));
+
+  api.post('/hotels/:id/enter', auth('hotels', { platform: true }), wrap((req, res) => {
+    const h = getHotel(Number(req.params.id));
+    if (!h) return res.status(404).json({ error: 'হোটেল নেই' });
+    db.prepare('UPDATE sessions SET hotel_id = ? WHERE token = ?').run(h.id, req.user.token);
+    res.json({ hotel: publicHotel(h) });
+  }));
+
+  api.post('/hotels/leave', auth('hotels', { platform: true }), wrap((req, res) => {
+    db.prepare('UPDATE sessions SET hotel_id = NULL WHERE token = ?').run(req.user.token);
+    res.json({ ok: true });
+  }));
+
+  // ----- hotel pages (everything below is scoped to req.hid) -----
+  api.get('/dashboard', auth('dashboard'), wrap((req, res) => {
+    const hid = req.hid;
+    const now = Date.now();
+    const rooms = db.prepare('SELECT * FROM rooms WHERE hotel_id = ? ORDER BY floor, number').all(hid);
+    const devices = db.prepare('SELECT * FROM devices WHERE hotel_id = ?').all(hid);
+    const newOrders = db.prepare("SELECT room, COUNT(*) AS n FROM orders WHERE hotel_id = ? AND status IN ('new','preparing') GROUP BY room").all(hid);
     const nMap = Object.fromEntries(newOrders.map((r) => [r.room, r.n]));
     const out = rooms.map((r) => {
       const devs = devices.filter((d) => d.room === r.number);
@@ -331,78 +451,77 @@ export function createServer(opts = {}) {
         activeOrders: nMap[r.number] || 0
       };
     });
-    const alerts = db.prepare('SELECT * FROM alerts WHERE seen = 0 ORDER BY id DESC LIMIT 20').all();
+    const alerts = db.prepare('SELECT * FROM alerts WHERE hotel_id = ? AND seen = 0 ORDER BY id DESC LIMIT 20').all(hid);
     const unassigned = devices.filter((d) => !rooms.some((r) => r.number === d.room));
     res.json({ rooms: out, alerts, unassignedDevices: unassigned });
   }));
 
   api.post('/alerts/seen', auth('dashboard'), wrap((req, res) => {
-    db.prepare('UPDATE alerts SET seen = 1 WHERE seen = 0').run();
+    db.prepare('UPDATE alerts SET seen = 1 WHERE hotel_id = ? AND seen = 0').run(req.hid);
     res.json({ ok: true });
   }));
 
-  // Rooms list management (manager)
   api.get('/rooms', auth('dashboard'), wrap((req, res) => {
-    res.json({ rooms: db.prepare('SELECT * FROM rooms ORDER BY floor, number').all() });
+    res.json({ rooms: db.prepare('SELECT * FROM rooms WHERE hotel_id = ? ORDER BY floor, number').all(req.hid) });
   }));
   api.post('/rooms', auth('content'), wrap((req, res) => {
     const { number, floor = '' } = req.body || {};
     if (!number || !/^[\w-]{1,10}$/.test(String(number))) throw bad('রুম নম্বর ঠিক নয়');
-    db.prepare('INSERT INTO rooms (number, floor) VALUES (?,?) ON CONFLICT(number) DO UPDATE SET floor = excluded.floor')
-      .run(String(number), String(floor));
-    audit(req.user, 'room.save', { number, floor });
+    db.prepare('INSERT INTO rooms (hotel_id, number, floor) VALUES (?,?,?) ON CONFLICT(hotel_id, number) DO UPDATE SET floor = excluded.floor')
+      .run(req.hid, String(number), String(floor));
+    audit(req.hid, req.user, 'room.save', { number, floor });
     res.json({ ok: true });
   }));
   api.delete('/rooms/:number', auth('content'), wrap((req, res) => {
-    db.prepare('DELETE FROM rooms WHERE number = ?').run(req.params.number);
-    audit(req.user, 'room.delete', { number: req.params.number });
+    db.prepare('DELETE FROM rooms WHERE hotel_id = ? AND number = ?').run(req.hid, req.params.number);
+    audit(req.hid, req.user, 'room.delete', { number: req.params.number });
     res.json({ ok: true });
   }));
 
   // Check-in / check-out
   api.post('/checkin', auth('checkin'), wrap((req, res) => {
+    const hid = req.hid;
     const { room, guestName, language = 'bn', checkoutAt } = req.body || {};
-    const r = getRoom(room);
+    const r = getRoom(hid, room);
     if (!r) throw bad('অজানা রুম');
     if (!guestName || !String(guestName).trim()) throw bad('অতিথির নাম দিন');
     if (!['bn', 'en'].includes(language)) throw bad('ভাষা bn বা en');
     const co = checkoutAt ? Number(new Date(checkoutAt)) : null;
     if (checkoutAt && !Number.isFinite(co)) throw bad('চেক-আউটের সময় ঠিক নয়');
-    db.prepare('UPDATE rooms SET guest_name = ?, language = ?, checkin_at = ?, checkout_at = ? WHERE number = ?')
-      .run(String(guestName).trim().slice(0, 80), language, Date.now(), co, r.number);
-    audit(req.user, 'checkin', { room: r.number, guestName });
-    pushRoom(r.number);
-    notifyAdmins({ type: 'rooms.changed' });
-    res.json({ ok: true, tvOnline: (tvSockets.get(r.number)?.size || 0) > 0 });
+    db.prepare('UPDATE rooms SET guest_name = ?, language = ?, checkin_at = ?, checkout_at = ? WHERE hotel_id = ? AND number = ?')
+      .run(String(guestName).trim().slice(0, 80), language, Date.now(), co, hid, r.number);
+    audit(hid, req.user, 'checkin', { room: r.number, guestName });
+    pushRoom(hid, r.number);
+    notifyAdmins(hid, { type: 'rooms.changed' });
+    res.json({ ok: true, tvOnline: (tvSockets.get(key(hid, r.number))?.size || 0) > 0 });
   }));
 
   api.get('/checkout/:room', auth('checkin'), wrap((req, res) => {
-    const r = getRoom(req.params.room);
+    const r = getRoom(req.hid, req.params.room);
     if (!r) throw bad('অজানা রুম');
-    const orders = roomOrders(r).filter((o) => !o.billed && o.status !== 'cancelled');
+    const orders = roomOrders(req.hid, r).filter((o) => !o.billed && o.status !== 'cancelled');
     res.json({ room: r, orders, total: orders.reduce((s, o) => s + o.total, 0) });
   }));
 
   api.post('/checkout', auth('checkin'), wrap((req, res) => {
-    const { room } = req.body || {};
-    const r = getRoom(room);
+    const hid = req.hid;
+    const r = getRoom(hid, (req.body || {}).room);
     if (!r) throw bad('অজানা রুম');
-    const orders = roomOrders(r).filter((o) => !o.billed && o.status !== 'cancelled');
-    if (orders.length) db.prepare(`UPDATE orders SET billed = 1, updated_at = ? WHERE id IN (${orders.map(() => '?').join(',')})`)
-      .run(Date.now(), ...orders.map((o) => o.id));
-    db.prepare('UPDATE rooms SET guest_name = NULL, checkin_at = NULL, checkout_at = NULL, language = ? WHERE number = ?')
-      .run('bn', r.number);
-    const tvs = getKv(db, 'tv');
-    const delivery = sendCommand([r.number], 'clearGuestData', { packages: tvs.clearPackages });
-    audit(req.user, 'checkout', { room: r.number, guest: r.guest_name, billed: orders.map((o) => o.id) });
-    pushRoom(r.number);
-    notifyAdmins({ type: 'rooms.changed' });
+    const orders = roomOrders(hid, r).filter((o) => !o.billed && o.status !== 'cancelled');
+    if (orders.length) db.prepare(`UPDATE orders SET billed = 1, updated_at = ? WHERE hotel_id = ? AND id IN (${orders.map(() => '?').join(',')})`)
+      .run(Date.now(), hid, ...orders.map((o) => o.id));
+    db.prepare("UPDATE rooms SET guest_name = NULL, checkin_at = NULL, checkout_at = NULL, language = 'bn' WHERE hotel_id = ? AND number = ?")
+      .run(hid, r.number);
+    const delivery = sendCommand(hid, [r.number], 'clearGuestData', { packages: tvSettings(hid).clearPackages });
+    audit(hid, req.user, 'checkout', { room: r.number, guest: r.guest_name, billed: orders.map((o) => o.id) });
+    pushRoom(hid, r.number);
+    notifyAdmins(hid, { type: 'rooms.changed' });
     res.json({ ok: true, billedOrders: orders, total: orders.reduce((s, o) => s + o.total, 0), delivery });
   }));
 
   // Notices
   api.get('/notices', auth('notices'), wrap((req, res) => {
-    res.json({ notices: db.prepare('SELECT * FROM notices ORDER BY id DESC LIMIT 200').all(), now: Date.now() });
+    res.json({ notices: db.prepare('SELECT * FROM notices WHERE hotel_id = ? ORDER BY id DESC LIMIT 200').all(req.hid), now: Date.now() });
   }));
   api.post('/notices', auth('notices'), wrap((req, res) => {
     const { targetType = 'all', target = '', style = 'ticker', textBn = '', textEn = '', startsAt, endsAt } = req.body || {};
@@ -413,30 +532,29 @@ export function createServer(opts = {}) {
     const s = startsAt ? Number(new Date(startsAt)) : null;
     const e = endsAt ? Number(new Date(endsAt)) : null;
     if (s && e && e <= s) throw bad('শেষের সময় শুরুর পরে হতে হবে');
-    const info = db.prepare(`INSERT INTO notices (target_type, target, style, text_bn, text_en, starts_at, ends_at, created_by, created_at)
-      VALUES (?,?,?,?,?,?,?,?,?)`).run(targetType, targetType === 'all' ? '' : String(target).trim(), style,
+    const info = db.prepare(`INSERT INTO notices (hotel_id, target_type, target, style, text_bn, text_en, starts_at, ends_at, created_by, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(req.hid, targetType, targetType === 'all' ? '' : String(target).trim(), style,
       String(textBn).slice(0, 500), String(textEn).slice(0, 500), s, e, req.user.username, Date.now());
-    audit(req.user, 'notice.create', { id: Number(info.lastInsertRowid), targetType, target, style });
-    pushAllRooms();
+    audit(req.hid, req.user, 'notice.create', { id: Number(info.lastInsertRowid), targetType, target, style });
+    pushAllRooms(req.hid);
     res.json({ ok: true, id: Number(info.lastInsertRowid) });
   }));
   api.delete('/notices/:id', auth('notices'), wrap((req, res) => {
-    db.prepare('DELETE FROM notices WHERE id = ?').run(Number(req.params.id));
-    audit(req.user, 'notice.delete', { id: Number(req.params.id) });
-    pushAllRooms();
+    db.prepare('DELETE FROM notices WHERE id = ? AND hotel_id = ?').run(Number(req.params.id), req.hid);
+    audit(req.hid, req.user, 'notice.delete', { id: Number(req.params.id) });
+    pushAllRooms(req.hid);
     res.json({ ok: true });
   }));
 
   // Content
-  api.get('/content', auth(), wrap((req, res) => res.json({ content: getKv(db, 'content') })));
+  api.get('/content', auth(), wrap((req, res) => res.json({ content: content(req.hid) })));
   api.put('/content', auth('content'), wrap((req, res) => {
     const c = req.body?.content;
     if (!c || typeof c !== 'object') throw bad('content দরকার');
-    const cur = getKv(db, 'content');
-    const next = { ...cur, ...c };
-    setKv(db, 'content', next);
-    audit(req.user, 'content.update', Object.keys(c));
-    pushAllRooms();
+    const next = { ...content(req.hid), ...c };
+    setKv(db, `content:${req.hid}`, next);
+    audit(req.hid, req.user, 'content.update', Object.keys(c));
+    pushAllRooms(req.hid);
     res.json({ content: next });
   }));
 
@@ -447,14 +565,14 @@ export function createServer(opts = {}) {
     if (!m) throw bad('শুধু PNG, JPG, WebP বা GIF ছবি');
     const buf = Buffer.from(m[2], 'base64');
     if (buf.length > 8 * 1024 * 1024) throw bad('ছবি ৮ MB-এর বেশি');
-    const name = `${sha256(buf.toString('base64')).slice(0, 20)}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
+    const name = `${sha256(buf).slice(0, 20)}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
     fs.writeFileSync(path.join(uploadDir, name), buf);
     res.json({ url: `/uploads/${name}` });
   }));
 
   // Menu
   api.get('/menu', auth(), wrap((req, res) => {
-    res.json({ items: db.prepare('SELECT * FROM menu_items ORDER BY sort, id').all() });
+    res.json({ items: db.prepare('SELECT * FROM menu_items WHERE hotel_id = ? ORDER BY sort, id').all(req.hid) });
   }));
   api.post('/menu', auth('menu'), wrap((req, res) => {
     const b = req.body || {};
@@ -465,20 +583,21 @@ export function createServer(opts = {}) {
       String(b.description_en || ''), price, b.image || null, b.available === false ? 0 : 1, Number(b.sort) || 0];
     let id = Number(b.id);
     if (id) {
-      db.prepare(`UPDATE menu_items SET category=?, name_bn=?, name_en=?, description_bn=?, description_en=?, price=?, image=?, available=?, sort=? WHERE id=?`)
-        .run(...vals, id);
+      const r = db.prepare(`UPDATE menu_items SET category=?, name_bn=?, name_en=?, description_bn=?, description_en=?, price=?, image=?, available=?, sort=?
+        WHERE id=? AND hotel_id=?`).run(...vals, id, req.hid);
+      if (!r.changes) return res.status(404).json({ error: 'খাবার নেই' });
     } else {
-      id = Number(db.prepare(`INSERT INTO menu_items (category, name_bn, name_en, description_bn, description_en, price, image, available, sort)
-        VALUES (?,?,?,?,?,?,?,?,?)`).run(...vals).lastInsertRowid);
+      id = Number(db.prepare(`INSERT INTO menu_items (hotel_id, category, name_bn, name_en, description_bn, description_en, price, image, available, sort)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).run(req.hid, ...vals).lastInsertRowid);
     }
-    audit(req.user, 'menu.save', { id, name: b.name_bn, price, available: b.available !== false });
-    pushAllRooms();
+    audit(req.hid, req.user, 'menu.save', { id, name: b.name_bn, price, available: b.available !== false });
+    pushAllRooms(req.hid);
     res.json({ ok: true, id });
   }));
   api.delete('/menu/:id', auth('menu'), wrap((req, res) => {
-    db.prepare('DELETE FROM menu_items WHERE id = ?').run(Number(req.params.id));
-    audit(req.user, 'menu.delete', { id: Number(req.params.id) });
-    pushAllRooms();
+    db.prepare('DELETE FROM menu_items WHERE id = ? AND hotel_id = ?').run(Number(req.params.id), req.hid);
+    audit(req.hid, req.user, 'menu.delete', { id: Number(req.params.id) });
+    pushAllRooms(req.hid);
     res.json({ ok: true });
   }));
 
@@ -486,29 +605,29 @@ export function createServer(opts = {}) {
   api.get('/orders', auth('orders.view'), wrap((req, res) => {
     const scope = req.query.scope || 'active';
     const rows = scope === 'active'
-      ? db.prepare("SELECT * FROM orders WHERE status IN ('new','preparing') ORDER BY id").all()
-      : db.prepare('SELECT * FROM orders ORDER BY id DESC LIMIT 200').all();
+      ? db.prepare("SELECT * FROM orders WHERE hotel_id = ? AND status IN ('new','preparing') ORDER BY id").all(req.hid)
+      : db.prepare('SELECT * FROM orders WHERE hotel_id = ? ORDER BY id DESC LIMIT 200').all(req.hid);
     res.json({ orders: rows.map(mapOrder) });
   }));
   api.post('/orders/:id/status', auth('orders.manage'), wrap((req, res) => {
     const { status } = req.body || {};
     if (!['new', 'preparing', 'delivered', 'cancelled'].includes(status)) throw bad('অবস্থা ঠিক নয়');
-    const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(Number(req.params.id));
+    const o = db.prepare('SELECT * FROM orders WHERE id = ? AND hotel_id = ?').get(Number(req.params.id), req.hid);
     if (!o) return res.status(404).json({ error: 'অর্ডার নেই' });
     db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?').run(status, Date.now(), o.id);
-    audit(req.user, 'order.status', { id: o.id, status });
-    pushRoom(o.room);
-    notifyAdmins({ type: 'order.updated', id: o.id, status });
+    audit(req.hid, req.user, 'order.status', { id: o.id, status });
+    pushRoom(req.hid, o.room);
+    notifyAdmins(req.hid, { type: 'order.updated', id: o.id, status });
     res.json({ ok: true });
   }));
 
   // TV control
   api.get('/tv/settings', auth('tv'), wrap((req, res) => {
-    const { pinHash, pinSalt, ...rest } = getKv(db, 'tv');
-    res.json({ settings: rest, apk: getKv(db, 'apk') });
+    const { pinHash, pinSalt, ...rest } = tvSettings(req.hid);
+    res.json({ settings: rest, apk: getKv(db, 'apk'), hotelCode: getHotel(req.hid).code, canUploadApk: can(req.user, 'apk') });
   }));
   api.put('/tv/settings', auth('tv'), wrap((req, res) => {
-    const cur = getKv(db, 'tv');
+    const cur = tvSettings(req.hid);
     const b = req.body || {};
     const next = { ...cur };
     if (b.pin != null) {
@@ -533,9 +652,9 @@ export function createServer(opts = {}) {
       next.clearPackages = b.clearPackages;
     }
     if (b.kiosk != null) next.kiosk = !!b.kiosk;
-    setKv(db, 'tv', next);
-    audit(req.user, 'tv.settings', { ...b, pin: b.pin != null ? '••••' : undefined });
-    pushAllRooms();
+    setKv(db, `tv:${req.hid}`, next);
+    audit(req.hid, req.user, 'tv.settings', { ...b, pin: b.pin != null ? '••••' : undefined });
+    pushAllRooms(req.hid);
     res.json({ ok: true });
   }));
 
@@ -543,22 +662,23 @@ export function createServer(opts = {}) {
     const { rooms, command } = req.body || {};
     const allowed = ['restart', 'reload', 'update', 'clearGuestData'];
     if (!allowed.includes(command)) throw bad('অজানা নির্দেশ');
-    let targets = rooms === 'all' ? db.prepare('SELECT number FROM rooms').all().map((r) => r.number) : rooms;
+    let targets = rooms === 'all' ? db.prepare('SELECT number FROM rooms WHERE hotel_id = ?').all(req.hid).map((r) => r.number) : rooms;
     if (!Array.isArray(targets) || targets.length === 0) throw bad('রুম বাছুন');
     targets = targets.map(String);
     const args = {};
     if (command === 'update') {
       const apk = getKv(db, 'apk');
-      if (!apk) throw bad('আগে নতুন APK আপলোড করুন');
+      if (!apk) throw bad('সার্ভারে এখনো নতুন APK আপলোড হয়নি');
       Object.assign(args, { url: '/apk/hotel-launcher.apk', versionCode: apk.versionCode, sha256: apk.sha256 });
     }
-    if (command === 'clearGuestData') args.packages = getKv(db, 'tv').clearPackages;
-    const result = sendCommand(targets, command, args);
-    audit(req.user, `tv.${command}`, { rooms: targets });
+    if (command === 'clearGuestData') args.packages = tvSettings(req.hid).clearPackages;
+    const result = sendCommand(req.hid, targets, command, args);
+    audit(req.hid, req.user, `tv.${command}`, { rooms: targets });
     res.json(result);
   }));
 
-  api.post('/tv/apk', auth('tv'), express.raw({ type: '*/*', limit: '200mb' }), wrap((req, res) => {
+  // One APK for every hotel: only the platform owner uploads it.
+  api.post('/tv/apk', auth('apk', { platform: true }), express.raw({ type: '*/*', limit: '200mb' }), wrap((req, res) => {
     const versionCode = Number(req.query.versionCode);
     const versionName = String(req.query.versionName || '');
     if (!Number.isInteger(versionCode) || versionCode < 1) throw bad('versionCode দিন');
@@ -567,33 +687,31 @@ export function createServer(opts = {}) {
     fs.writeFileSync(path.join(apkDir, 'hotel-launcher.apk'), buf);
     const meta = { versionCode, versionName, size: buf.length, sha256: sha256(buf), uploadedAt: Date.now() };
     setKv(db, 'apk', meta);
-    audit(req.user, 'tv.apk.upload', { versionCode, versionName, size: buf.length });
-    pushAllRooms();
+    audit(null, req.user, 'tv.apk.upload', { versionCode, versionName, size: buf.length });
     res.json({ apk: meta });
   }));
 
   // Reports
   api.get('/reports', auth('reports'), wrap((req, res) => {
+    const hid = req.hid;
     const days = Math.max(1, Math.min(90, Number(req.query.days) || 7));
     const since = Date.now() - days * 86400000;
-    const orders = db.prepare("SELECT created_at, total, status FROM orders WHERE created_at >= ? AND status != 'cancelled'").all(since);
+    const orders = db.prepare("SELECT created_at, total, items FROM orders WHERE hotel_id = ? AND created_at >= ? AND status != 'cancelled'").all(hid, since);
     const byDay = {};
+    const top = {};
     for (const o of orders) {
       const k = todayKey(o.created_at);
       byDay[k] ??= { day: k, orders: 0, revenue: 0 };
       byDay[k].orders++;
       byDay[k].revenue += o.total;
-    }
-    const offline = db.prepare('SELECT room, SUM(minutes) AS minutes FROM offline_minutes WHERE day >= ? GROUP BY room ORDER BY minutes DESC')
-      .all(todayKey(since));
-    const top = {};
-    for (const o of db.prepare("SELECT items FROM orders WHERE created_at >= ? AND status != 'cancelled'").all(since)) {
       for (const it of JSON.parse(o.items)) {
         top[it.name_bn] ??= { name: it.name_bn, qty: 0, revenue: 0 };
         top[it.name_bn].qty += it.qty;
         top[it.name_bn].revenue += it.qty * it.price;
       }
     }
+    const offline = db.prepare('SELECT room, SUM(minutes) AS minutes FROM offline_minutes WHERE hotel_id = ? AND day >= ? GROUP BY room ORDER BY minutes DESC')
+      .all(hid, todayKey(since));
     res.json({
       days,
       byDay: Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day)),
@@ -603,33 +721,35 @@ export function createServer(opts = {}) {
   }));
 
   api.get('/audit', auth('users'), wrap((req, res) => {
-    res.json({ log: db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT 300').all() });
+    res.json({ log: db.prepare('SELECT * FROM audit_log WHERE hotel_id = ? ORDER BY id DESC LIMIT 300').all(req.hid) });
   }));
 
-  // Users
+  // Users of this hotel
   api.get('/users', auth('users'), wrap((req, res) => {
-    res.json({ users: db.prepare('SELECT id, username, display_name, role, active, created_at FROM users ORDER BY id').all() });
+    res.json({ users: db.prepare('SELECT id, username, display_name, role, active, created_at FROM users WHERE hotel_id = ? ORDER BY id').all(req.hid) });
   }));
   api.post('/users', auth('users'), wrap((req, res) => {
     const { id, username, displayName = '', role, password, active = true } = req.body || {};
-    if (!ROLE_PERMS[role]) throw bad('রোল ঠিক নয়');
+    if (!HOTEL_ROLES.includes(role)) throw bad('রোল ঠিক নয়');
     if (id) {
+      const target = db.prepare('SELECT * FROM users WHERE id = ? AND hotel_id = ?').get(Number(id), req.hid);
+      if (!target) return res.status(404).json({ error: 'ইউজার নেই' });
       if (Number(id) === req.user.id && (role !== 'manager' || !active)) throw bad('নিজের ম্যানেজার অনুমতি সরানো যাবে না');
-      db.prepare('UPDATE users SET display_name = ?, role = ?, active = ? WHERE id = ?').run(displayName, role, active ? 1 : 0, Number(id));
+      db.prepare('UPDATE users SET display_name = ?, role = ?, active = ? WHERE id = ?').run(displayName, role, active ? 1 : 0, target.id);
       if (password) {
         if (String(password).length < 6) throw bad('পাসওয়ার্ড কমপক্ষে ৬ অক্ষর');
-        db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hashPassword(password), Number(id));
-        db.prepare('DELETE FROM sessions WHERE user_id = ?').run(Number(id));
+        db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hashPassword(password), target.id);
+        db.prepare('DELETE FROM sessions WHERE user_id = ?').run(target.id);
       }
-      if (!active) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(Number(id));
-      audit(req.user, 'user.update', { id, role, active });
+      if (!active) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(target.id);
+      audit(req.hid, req.user, 'user.update', { id, role, active });
     } else {
       if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(String(username || ''))) throw bad('ইউজারনেম ৩–৩০ অক্ষর (a-z, 0-9)');
       if (!password || String(password).length < 6) throw bad('পাসওয়ার্ড কমপক্ষে ৬ অক্ষর');
-      if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) throw bad('এই ইউজারনেম আগেই আছে');
-      db.prepare('INSERT INTO users (username, display_name, pass_hash, role, created_at) VALUES (?,?,?,?,?)')
-        .run(username, displayName, hashPassword(password), role, Date.now());
-      audit(req.user, 'user.create', { username, role });
+      if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) throw bad('এই ইউজারনেম আগেই আছে (সব হোটেল মিলিয়ে ইউজারনেম আলাদা হতে হবে)');
+      db.prepare('INSERT INTO users (hotel_id, username, display_name, pass_hash, role, created_at) VALUES (?,?,?,?,?,?)')
+        .run(req.hid, username, displayName, hashPassword(password), role, Date.now());
+      audit(req.hid, req.user, 'user.create', { username, role });
     }
     res.json({ ok: true });
   }));
@@ -645,8 +765,10 @@ export function createServer(opts = {}) {
     if (url.pathname === '/ws/tv') {
       if (!ipAllowed(tvCidrs, req.socket.remoteAddress)) return socket.destroy();
       const room = url.searchParams.get('room');
+      let hid;
+      try { hid = tvHotel(url.searchParams.get('hotel')); } catch { return socket.destroy(); }
       if (!room) return socket.destroy();
-      wss.handleUpgrade(req, socket, head, (ws) => onTv(ws, req, url));
+      wss.handleUpgrade(req, socket, head, (ws) => onTv(ws, req, url, hid));
     } else if (url.pathname === '/ws/admin') {
       if (!ipAllowed(adminCidrs, req.socket.remoteAddress)) return socket.destroy();
       const user = sessionUser(cookieToken(req));
@@ -655,8 +777,9 @@ export function createServer(opts = {}) {
     } else socket.destroy();
   });
 
-  function onTv(ws, req, url) {
+  function onTv(ws, req, url, hid) {
     const room = String(url.searchParams.get('room'));
+    const k = key(hid, room);
     const dev = {
       id: url.searchParams.get('device') || `anon-${normalizeIp(req.socket.remoteAddress)}`,
       room, ip: req.socket.remoteAddress,
@@ -664,29 +787,31 @@ export function createServer(opts = {}) {
     };
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
-    if (!tvSockets.has(room)) tvSockets.set(room, new Set());
-    tvSockets.get(room).add(ws);
-    touchDevice(dev);
-    notifyAdmins({ type: 'rooms.changed' });
-    send(ws, { type: 'state', state: roomState(room) });
-    for (const cmd of pendingCommands.get(room) || []) send(ws, { type: 'command', ...cmd });
-    pendingCommands.delete(room);
+    if (!tvSockets.has(k)) tvSockets.set(k, new Set());
+    tvSockets.get(k).add(ws);
+    touchDevice(hid, dev);
+    notifyAdmins(hid, { type: 'rooms.changed' });
+    send(ws, { type: 'state', state: { ...roomState(hid, room), hotelName: getHotel(hid).name } });
+    for (const cmd of pendingCommands.get(k) || []) send(ws, { type: 'command', ...cmd });
+    pendingCommands.delete(k);
     ws.on('message', (raw) => {
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
-      if (msg.type === 'heartbeat') { touchDevice({ ...dev, version: msg.version ?? dev.version }); }
+      if (msg.type === 'heartbeat') { touchDevice(hid, { ...dev, version: msg.version ?? dev.version }); }
       else if (msg.type === 'commandResult') {
-        notifyAdmins({ type: 'command.result', room, id: msg.id, ok: !!msg.ok, message: String(msg.message || '').slice(0, 200) });
-        if (msg.command === 'clearGuestData' && !msg.ok) addAlert(room, 'clear_failed', 'অতিথির লগইন মোছা যায়নি (Device Owner চালু নেই?)');
+        notifyAdmins(hid, { type: 'command.result', room, id: msg.id, ok: !!msg.ok, message: String(msg.message || '').slice(0, 200) });
+        if (msg.command === 'clearGuestData' && !msg.ok) addAlert(hid, room, 'clear_failed', 'অতিথির লগইন মোছা যায়নি (Device Owner চালু নেই?)');
       }
     });
     ws.on('close', () => {
-      tvSockets.get(room)?.delete(ws);
-      notifyAdmins({ type: 'rooms.changed' });
+      tvSockets.get(k)?.delete(ws);
+      notifyAdmins(hid, { type: 'rooms.changed' });
     });
   }
 
   function onAdmin(ws, user) {
+    ws.hid = user.hid;
+    ws.isSuper = user.role === 'superadmin';
     adminSockets.add(ws);
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
@@ -696,7 +821,6 @@ export function createServer(opts = {}) {
 
   // ---------- timers ----------
   const timers = [];
-  // keep sockets healthy
   timers.push(setInterval(() => {
     for (const ws of wss.clients) {
       if (!ws.isAlive) { ws.terminate(); continue; }
@@ -704,19 +828,21 @@ export function createServer(opts = {}) {
       ws.ping();
     }
   }, 30000));
-  // offline minutes + scheduled notices becoming active/inactive
-  let lastNoticeKey = '';
+  // offline minutes + scheduled notices becoming active/inactive, per hotel
+  const lastNoticeKey = new Map();
   timers.push(setInterval(() => {
     const now = Date.now();
     const day = todayKey(now);
-    const upsert = db.prepare(`INSERT INTO offline_minutes (day, room, minutes) VALUES (?,?,1)
-      ON CONFLICT(day, room) DO UPDATE SET minutes = minutes + 1`);
-    for (const d of db.prepare('SELECT room, MAX(last_seen) AS last FROM devices WHERE room IS NOT NULL GROUP BY room').all()) {
-      if (now - d.last > OFFLINE_AFTER) upsert.run(day, d.room);
+    const upsert = db.prepare(`INSERT INTO offline_minutes (hotel_id, day, room, minutes) VALUES (?,?,?,1)
+      ON CONFLICT(hotel_id, day, room) DO UPDATE SET minutes = minutes + 1`);
+    for (const d of db.prepare('SELECT hotel_id, room, MAX(last_seen) AS last FROM devices WHERE room IS NOT NULL GROUP BY hotel_id, room').all()) {
+      if (now - d.last > OFFLINE_AFTER) upsert.run(d.hotel_id, day, d.room);
     }
-    const key = activeNotices(null, now).map((n) => n.id).join(',');
-    if (key !== lastNoticeKey) { lastNoticeKey = key; pushAllRooms(); }
-    notifyAdmins({ type: 'tick' });
+    for (const h of db.prepare('SELECT id FROM hotels WHERE active = 1').all()) {
+      const k = activeNotices(h.id, null, now).map((n) => n.id).join(',');
+      if (k !== (lastNoticeKey.get(h.id) ?? '')) { lastNoticeKey.set(h.id, k); pushAllRooms(h.id); }
+    }
+    for (const ws of adminSockets) send(ws, { type: 'tick' });
   }, 60000));
   // daily backup at startup + every 24 h, keep 14
   const backup = () => {
@@ -742,10 +868,12 @@ export function createServer(opts = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 8080);
-  const { server } = createServer();
+  const { server, db } = createServer();
   server.listen(port, '0.0.0.0', () => {
     console.log(`হোটেল টিভি সার্ভার চলছে: http://0.0.0.0:${port}`);
     console.log(`  অ্যাডমিন প্যানেল: http://<এই কম্পিউটারের আইপি>:${port}/admin/`);
-    console.log(`  অতিথির স্ক্রিন (ব্রাউজারে পরীক্ষা): http://localhost:${port}/tv/?room=101`);
+    for (const h of db.prepare('SELECT id, name, code FROM hotels ORDER BY id').all()) {
+      console.log(`  হোটেল #${h.id} ${h.name} — টিভি কোড: ${h.code}  (ব্রাউজারে পরীক্ষা: http://localhost:${port}/tv/?hotel=${h.code}&room=101)`);
+    }
   });
 }

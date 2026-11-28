@@ -33,6 +33,7 @@ class Bridge(private val a: MainActivity) {
         put("standalone", prefs.standalone)
         put("adminUrl", if (prefs.standalone) "http://${ipAddress()}:${LocalServer.PORT}/admin/" else "${prefs.serverUrl}/admin/")
         put("room", prefs.room)
+        put("hotelCode", prefs.hotelCode)
         put("deviceId", prefs.deviceId)
         put("versionName", BuildConfig.VERSION_NAME)
         put("versionCode", BuildConfig.VERSION_CODE)
@@ -53,6 +54,7 @@ class Bridge(private val a: MainActivity) {
     fun setConfig(json: String): String {
         val o = JSONObject(json)
         if (o.has("room")) prefs.room = o.getString("room").trim()
+        if (o.has("hotelCode")) prefs.hotelCode = o.getString("hotelCode")
         if (o.has("serverUrl")) prefs.serverUrl = o.getString("serverUrl").trim()
         if (prefs.standalone) LocalServer.start(a)
         return "ok"

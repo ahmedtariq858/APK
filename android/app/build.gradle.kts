@@ -26,8 +26,8 @@ android {
         applicationId = "com.rangs.hotellauncher"
         minSdk = 24
         targetSdk = 34
-        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 2
-        versionName = (project.findProperty("versionName") as String?) ?: "1.1.0"
+        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 3
+        versionName = (project.findProperty("versionName") as String?) ?: "1.2.0"
         // Server the TV talks to before anyone sets it in the TV-admin menu.
         buildConfigField("String", "DEFAULT_SERVER", "\"${project.findProperty("defaultServer") ?: ""}\"")
     }

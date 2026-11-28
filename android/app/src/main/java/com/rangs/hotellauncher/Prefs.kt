@@ -16,6 +16,11 @@ class Prefs(context: Context) {
         get() = sp.getString("room", null) ?: if (standalone) "101" else ""
         set(v) = sp.edit().putString("room", v).apply()
 
+    /** Which hotel on a shared (cloud) server this TV belongs to — the code from the admin panel. */
+    var hotelCode: String
+        get() = sp.getString("hotelCode", "") ?: ""
+        set(v) = sp.edit().putString("hotelCode", v.trim().uppercase()).apply()
+
     var serverUrl: String
         get() = sp.getString("serverUrl", BuildConfig.DEFAULT_SERVER) ?: ""
         set(v) = sp.edit().putString("serverUrl", v.trimEnd('/')).apply()
