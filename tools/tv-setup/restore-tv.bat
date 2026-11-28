@@ -5,6 +5,7 @@ title Rangs Hotel TV - restore
 cd /d "%~dp0"
 set PKG=com.rangs.hotellauncher
 where adb >nul 2>nul || if exist "%~dp0adb.exe" set "PATH=%~dp0;%PATH%"
+where adb >nul 2>nul || if exist "%~dp0..\adb.exe" set "PATH=%~dp0..;%PATH%"
 
 echo ============================================================
 echo   Rangs Hotel TV - TV-ke shadharon obosthay ferano

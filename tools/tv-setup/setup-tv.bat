@@ -7,7 +7,7 @@ set PKG=com.rangs.hotellauncher
 
 where adb >nul 2>nul
 if errorlevel 1 (
-  if exist "%~dp0adb.exe" ( set "PATH=%~dp0;%PATH%" ) else (
+  if exist "%~dp0adb.exe" ( set "PATH=%~dp0;%PATH%" ) else if exist "%~dp0..\adb.exe" ( set "PATH=%~dp0..;%PATH%" ) else (
     echo [X] adb.exe paoa jayni. Ei file-ta platform-tools folder-e rakhun, ba adb PATH-e din.
     pause & exit /b 1
   )
