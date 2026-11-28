@@ -151,6 +151,7 @@
     { id: 'livetv', ic: '📺', k: 'liveTv' },
     { id: 'youtube', ic: '▶️', label: 'YouTube' },
     { id: 'netflix', ic: '🎬', label: 'Netflix' },
+    { id: 'prime', ic: '🎥', label: 'Prime Video' },
     { id: 'roomservice', ic: '🍽', k: 'roomService' },
     { id: 'services', ic: '🛎', k: 'services' },
     { id: 'nearby', ic: '🗺', k: 'nearby' },
@@ -160,7 +161,7 @@
 
   function fmtTime(ts) {
     const d = new Date(ts);
-    return num(d.toLocaleTimeString(lang === 'bn' ? 'en-GB' : 'en-US', { hour: '2-digit', minute: '2-digit' }));
+    return num(d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }));
   }
   function fmtDate(ts, withTime) {
     const d = new Date(ts);
@@ -177,7 +178,7 @@
     homeEl.innerHTML = `
       <div class="top">
         <div class="brand">${c.logo ? `<img src="${esc(abs(c.logo))}" alt="">` : ''}<div class="name">${esc(tr(c.hotelName) || 'Hotel')}</div></div>
-        <div class="clock"><div class="time" id="clk-t"></div><div class="date" id="clk-d"></div></div>
+        <div class="clock"><div class="clock-row"><span class="wx" id="wx"></span><span class="time" id="clk-t"></span></div><div class="date" id="clk-d"></div></div>
       </div>
       <div class="welcome">
         <div class="hello">${esc(t('welcome'))}</div>
@@ -209,6 +210,51 @@
     const tEl = $('#clk-t'), dEl = $('#clk-d');
     if (tEl) tEl.textContent = fmtTime(now());
     if (dEl) dEl.textContent = fmtDate(now());
+    renderWeather();
+  }
+
+  // ---------------------------------------------------------------- weather (Open-Meteo, free, no key)
+  const DEFAULT_WEATHER = { city: { bn: 'ঢাকা', en: 'Dhaka' }, lat: 23.8103, lon: 90.4125 };
+  let weather = store.get('weather', null); // { temp, code, at, lat, lon }
+  function weatherPlace() {
+    const w = (state && state.content && state.content.weather) || DEFAULT_WEATHER;
+    const lat = Number(w.lat), lon = Number(w.lon);
+    return Number.isFinite(lat) && Number.isFinite(lon) && (lat || lon) ? { ...w, lat, lon } : null;
+  }
+  function weatherIcon(code) {
+    if (code === 0) return '☀️';
+    if (code <= 2) return '🌤️';
+    if (code === 3) return '☁️';
+    if (code === 45 || code === 48) return '🌫️';
+    if (code >= 95) return '⛈️';
+    if (code >= 80) return '🌦️';
+    if (code >= 71 && code <= 77) return '❄️';
+    if (code >= 51) return '🌧️';
+    return '🌡️';
+  }
+  function renderWeather() {
+    const el = $('#wx');
+    if (!el) return;
+    const place = weatherPlace();
+    const fresh = weather && place && Math.abs(weather.lat - place.lat) < 0.01 && Math.abs(weather.lon - place.lon) < 0.01
+      && Date.now() - weather.at < 3 * 3600 * 1000;
+    el.textContent = fresh ? `${weatherIcon(weather.code)} ${num(Math.round(weather.temp))}°C` : '';
+    el.title = place ? tr(place.city) : '';
+  }
+  async function loadWeather() {
+    const place = weatherPlace();
+    if (!place) { renderWeather(); return; }
+    try {
+      const u = `https://api.open-meteo.com/v1/forecast?latitude=${place.lat}&longitude=${place.lon}&current=temperature_2m,weather_code&timezone=auto`;
+      const r = await fetch(u, { cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status);
+      const d = await r.json();
+      if (d.current && typeof d.current.temperature_2m === 'number') {
+        weather = { temp: d.current.temperature_2m, code: d.current.weather_code, at: Date.now(), lat: place.lat, lon: place.lon };
+        store.set('weather', weather);
+      }
+    } catch (e) { /* no internet: keep the last reading for up to 3 hours */ }
+    renderWeather();
   }
 
   // ---------------------------------------------------------------- views
@@ -590,6 +636,7 @@
       if (tile === 'livetv') openLiveTv();
       else if (tile === 'youtube') launch('com.google.android.youtube.tv');
       else if (tile === 'netflix') launch('com.netflix.ninja');
+      else if (tile === 'prime') launch('com.amazon.amazonvideo.livingroom');
       else if (tile === 'roomservice') openRoomService();
       else if (tile === 'services') openServices();
       else if (tile === 'nearby') openNearby();
@@ -724,6 +771,9 @@
     state = s;
     store.set('state', s);
     store.set('lastSync', Date.now());
+    const prevPlace = weather ? weather.lat + ',' + weather.lon : '';
+    const place = weatherPlace();
+    if (place && prevPlace !== place.lat + ',' + place.lon) setTimeout(loadWeather, 0);
     if (prevGuestKey !== nextGuestKey) {
       // New guest (or check-out): fresh cart, language from check-in, popups shown again.
       cart = {};
@@ -819,6 +869,8 @@
   };
 
   renderAll();
+  loadWeather();
+  setInterval(loadWeather, 15 * 60 * 1000);
   if (!cfg.room || !apiBase()) openTvAdmin();
   else {
     const st = setupStatus();

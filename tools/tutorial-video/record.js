@@ -133,7 +133,7 @@ const studioHtml = fs.readFileSync(path.join(OUT, 'studio.html'), 'utf8');
   // ------------------------------------------------------------ 7. room service from the TV
   await S('cap', 7, 'অতিথি রিমোট দিয়ে রুম সার্ভিস অর্ডার দেন', 'তীর বোতাম দিয়ে “রুম সার্ভিস”-এ গিয়ে OK, তারপর খাবার বেছে + চাপুন।');
   await S('remote', 'রুম সার্ভিস খোলা হচ্ছে…');
-  for (let i = 0; i < 3; i++) await key('ArrowRight');
+  for (let i = 0; i < 4; i++) await key('ArrowRight');
   await key('Enter', 1500);
   await S('remote', '+ চেপে খাবার যোগ');
   await key('ArrowRight'); // first focusable is "+" of the first dish
@@ -186,7 +186,7 @@ const studioHtml = fs.readFileSync(path.join(OUT, 'studio.html'), 'utf8');
   await S('cap', 10, 'বাংলা ↔ English', 'চেক-ইনে বেছে নেওয়া ভাষায় টিভি শুরু হয়; অতিথি নিজেও বদলাতে পারেন।');
   await S('remote', 'Back চেপে হোম, তারপর “English”');
   await key('Escape', 1200);
-  for (let i = 0; i < 6; i++) await key('ArrowRight', 450);
+  for (let i = 0; i < 7; i++) await key('ArrowRight', 450);
   await key('Enter', 3500);
   await key('Enter', 2500); // back to বাংলা
 

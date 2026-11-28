@@ -528,6 +528,7 @@
     });
   }
 
+  const WX_CITIES = [{"bn": "ঢাকা", "en": "Dhaka", "lat": 23.8103, "lon": 90.4125}, {"bn": "চট্টগ্রাম", "en": "Chattogram", "lat": 22.3569, "lon": 91.7832}, {"bn": "কক্সবাজার", "en": "Cox's Bazar", "lat": 21.4272, "lon": 92.0058}, {"bn": "সিলেট", "en": "Sylhet", "lat": 24.8949, "lon": 91.8687}, {"bn": "শ্রীমঙ্গল", "en": "Sreemangal", "lat": 24.3065, "lon": 91.7296}, {"bn": "খুলনা", "en": "Khulna", "lat": 22.8456, "lon": 89.5403}, {"bn": "রাজশাহী", "en": "Rajshahi", "lat": 24.3745, "lon": 88.6042}, {"bn": "রংপুর", "en": "Rangpur", "lat": 25.7439, "lon": 89.2752}, {"bn": "বরিশাল", "en": "Barishal", "lat": 22.701, "lon": 90.3535}, {"bn": "কুয়াকাটা", "en": "Kuakata", "lat": 21.8167, "lon": 90.1167}];
   async function pageContent(el) {
     const [{ content: c }, { rooms }] = await Promise.all([api('/content'), api('/rooms')]);
     const svcRow = (s = {}) => `<div class="item"><input name="icon" value="${esc(s.icon || '')}" placeholder="🍽">
@@ -535,6 +536,7 @@
       <input name="extra" value="${esc(s.hours ?? s.distance ?? '')}" placeholder="সময় / দূরত্ব"><input name="note_bn" value="${esc(s.note?.bn || '')}" placeholder="নোট">
       <button type="button" class="btn sm danger" data-rm>✕</button></div>`;
     const lt = c.liveTv || { mode: 'tuner', package: '', channels: [] };
+    const wx = c.weather || {};
     el.innerHTML = `<h2>কনটেন্ট</h2>
       <form id="cf">
         <div class="card"><h3>হোটেল</h3><div class="grid2">
@@ -551,6 +553,12 @@
         </div></div>
         <div class="card list-edit" id="svc"><h3>হোটেল সেবা ও সময়</h3>${(c.services || []).map(svcRow).join('')}<button type="button" class="btn sm" data-add="svc">+ সেবা যোগ</button></div>
         <div class="card list-edit" id="near"><h3>আশপাশের জায়গা</h3>${(c.nearby || []).map(svcRow).join('')}<button type="button" class="btn sm" data-add="near">+ জায়গা যোগ</button></div>
+        <div class="card"><h3>আবহাওয়া (টিভিতে সময়ের পাশে তাপমাত্রা)</h3><div class="grid2">
+          <label>শহর বাছুন<select id="wx-city"><option value="">— নিজে লিখুন —</option>${WX_CITIES.map((c, i) => `<option value="${i}" ${Number(wx.lat) === c.lat && Number(wx.lon) === c.lon ? 'selected' : ''}>${esc(c.bn)}</option>`).join('')}</select></label>
+          <label>জায়গার নাম<input name="wx_city" value="${esc(wx.city?.bn || '')}"></label>
+          <label>অক্ষাংশ (latitude)<input name="wx_lat" value="${esc(wx.lat ?? '')}" placeholder="23.8103"></label>
+          <label>দ্রাঘিমাংশ (longitude)<input name="wx_lon" value="${esc(wx.lon ?? '')}" placeholder="90.4125"></label>
+        </div><p class="muted">অন্য জায়গার জন্য: Google Maps-এ হোটেলের জায়গায় চেপে ধরলে যে দুটো সংখ্যা আসে (যেমন 21.4272, 92.0058) সেগুলো দিন। খালি রাখলে টিভিতে তাপমাত্রা দেখাবে না। তাপমাত্রা আসে Open-Meteo থেকে, টিভিতে ইন্টারনেট লাগে।</p></div>
         <div class="card"><h3>লাইভ টিভি</h3><div class="grid2">
           <label>উৎস<select name="lt_mode"><option value="tuner" ${lt.mode === 'tuner' ? 'selected' : ''}>টিভির নিজস্ব টিউনার</option><option value="iptv" ${lt.mode === 'iptv' ? 'selected' : ''}>হোটেলের IPTV</option></select></label>
           <label>টিউনার অ্যাপের প্যাকেজ (খালি = নিজে খুঁজে নেবে)<input name="lt_package" value="${esc(lt.package)}" placeholder="com.mediatek.wwtv.tvcenter"></label>
@@ -564,6 +572,11 @@
         <div class="checks" style="margin-top:12px">${rooms.map((r) => `<label>${esc(r.number)} <span class="muted">ফ্লোর ${esc(r.floor)}</span> <button class="btn sm ghost" data-rdel="${esc(r.number)}">✕</button></label>`).join('')}</div>
       </div>`;
     $$('[data-add]', el).forEach((b) => { b.onclick = () => b.insertAdjacentHTML('beforebegin', svcRow()); });
+    $('#wx-city', el).onchange = (e) => {
+      const c = WX_CITIES[Number(e.target.value)];
+      if (!c || e.target.value === '') return;
+      $('[name=wx_city]', el).value = c.bn; $('[name=wx_lat]', el).value = c.lat; $('[name=wx_lon]', el).value = c.lon;
+    };
     el.addEventListener('click', (e) => { if (e.target.matches('[data-rm]')) e.target.closest('.item').remove(); });
     const readList = (id, key) => $$(`#${id} .item`, el).map((row) => {
       const g = (n) => $(`[name=${n}]`, row).value.trim();
@@ -579,6 +592,13 @@
         wifi: { ssid: f.wifi_ssid, password: f.wifi_password },
         receptionPhone: f.receptionPhone, checkoutTime: f.checkoutTime,
         services: readList('svc', 'hours'), nearby: readList('near', 'distance'),
+        weather: (() => {
+          const lat = parseFloat(f.wx_lat), lon = parseFloat(f.wx_lon);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return { city: { bn: '', en: '' }, lat: null, lon: null };
+          if (Math.abs(lat) > 90 || Math.abs(lon) > 180) throw new Error('অক্ষাংশ/দ্রাঘিমাংশ ঠিক নয়');
+          const known = WX_CITIES.find((c) => c.bn === f.wx_city.trim());
+          return { city: { bn: f.wx_city.trim(), en: known ? known.en : f.wx_city.trim() }, lat, lon };
+        })(),
         liveTv: {
           mode: f.lt_mode, package: f.lt_package.trim(),
           channels: f.lt_channels.split('\n').map((l) => l.split('|').map((s) => s.trim())).filter((p) => p[0] && p[1]).map(([name, url]) => ({ name, url }))

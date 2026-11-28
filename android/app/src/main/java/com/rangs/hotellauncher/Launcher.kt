@@ -67,7 +67,7 @@ object Launcher {
                 }
                 dpm.addPersistentPreferredActivity(admin(a), filter, homeAlias(a))
             }
-            val allowed = mutableSetOf(a.packageName, "com.google.android.youtube.tv", "com.netflix.ninja")
+            val allowed = mutableSetOf(a.packageName, "com.google.android.youtube.tv", "com.netflix.ninja", "com.amazon.amazonvideo.livingroom")
             allowed += LIVE_TV_PACKAGES
             dpm.setLockTaskPackages(admin(a), allowed.filter { installed(a, it) }.toTypedArray())
             if (Build.VERSION.SDK_INT >= 28) {

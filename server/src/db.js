@@ -212,14 +212,15 @@ export const DEFAULT_CONTENT = {
     { icon: '🏥', name: { bn: 'স্কয়ার হাসপাতাল', en: 'Square Hospital' }, distance: '1.2 km' },
     { icon: '🌳', name: { bn: 'রমনা পার্ক', en: 'Ramna Park' }, distance: '3.0 km' }
   ],
-  liveTv: { mode: 'tuner', package: '', channels: [] }
+  liveTv: { mode: 'tuner', package: '', channels: [] },
+  weather: { city: { bn: 'ঢাকা', en: 'Dhaka' }, lat: 23.8103, lon: 90.4125 }
 };
 
 export const DEFAULT_TV_SETTINGS = {
   pin: '1234',
   combo: ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'],
   maxVolume: 80,
-  clearPackages: ['com.netflix.ninja', 'com.google.android.youtube.tv'],
+  clearPackages: ['com.netflix.ninja', 'com.google.android.youtube.tv', 'com.amazon.amazonvideo.livingroom'],
   kiosk: false
 };
 

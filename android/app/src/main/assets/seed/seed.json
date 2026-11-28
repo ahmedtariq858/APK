@@ -116,6 +116,14 @@
    "mode": "tuner",
    "package": "",
    "channels": []
+  },
+  "weather": {
+   "city": {
+    "bn": "ঢাকা",
+    "en": "Dhaka"
+   },
+   "lat": 23.8103,
+   "lon": 90.4125
   }
  },
  "tv": {
@@ -132,7 +140,8 @@
   "maxVolume": 80,
   "clearPackages": [
    "com.netflix.ninja",
-   "com.google.android.youtube.tv"
+   "com.google.android.youtube.tv",
+   "com.amazon.amazonvideo.livingroom"
   ],
   "kiosk": false
  },
